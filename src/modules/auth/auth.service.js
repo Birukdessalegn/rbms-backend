@@ -50,23 +50,23 @@ const loginUser = async (username, password) => {
   );
 
 
-console.log("LOGIN DEBUG:", {
-  username: user.username,
-  userId: user.id,
-  roleId: user.role_id,
-  status: user.status,
-  passwordMatch: await bcrypt.compare(
-    password,
-    user.password_hash
-  ),
-  hashPrefix: user.password_hash?.substring(0, 7),
-});
-
   if (result.rows.length === 0) {
     throw new Error("Invalid username or password");
   }
 
   const user = result.rows[0];
+
+  console.log("LOGIN DEBUG:", {
+    username: user.username,
+    userId: user.id,
+    roleId: user.role_id,
+    status: user.status,
+    passwordMatch: await bcrypt.compare(
+      password,
+      user.password_hash
+    ),
+    hashPrefix: user.password_hash?.substring(0, 7),
+  });
 
   // Check account status
   if (user.status !== "active") {
@@ -79,10 +79,7 @@ console.log("LOGIN DEBUG:", {
     user.password_hash
   );
 
-  if (!await bcrypt.compare(
-    password,
-    user.password_hash
-  )) {
+  if (!passwordMatch) {
     throw new Error("Invalid username or password");
   }
 

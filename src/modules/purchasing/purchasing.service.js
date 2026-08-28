@@ -104,6 +104,10 @@ const getAllPurchases = async () => {
       po.discount,
       po.total,
       po.status,
+      po.payment_status,
+      po.payment_method,
+      po.paid_amount,
+      po.paid_at,
       po.notes,
       po.created_at,
       po.updated_at,
@@ -199,6 +203,8 @@ const createPurchase = async (data) => {
       discount,
       notes,
       createdBy,
+      paymentStatus,
+      paymentMethod,
       items,
     } = data;
 
@@ -227,6 +233,8 @@ const createPurchase = async (data) => {
       taxAmount -
       discountAmount;
 
+    const isPaid = paymentStatus === "paid";
+
     const purchaseResult = await client.query(
       `
       INSERT INTO purchase_orders (
@@ -239,6 +247,10 @@ const createPurchase = async (data) => {
         discount,
         total,
         status,
+        payment_status,
+        payment_method,
+        paid_amount,
+        paid_at,
         notes,
         created_by
       )
@@ -246,8 +258,8 @@ const createPurchase = async (data) => {
         $1,$2,
         COALESCE($3,CURRENT_DATE),
         $4,$5,$6,$7,$8,
-        'draft',
-        $9,$10
+        'ordered',
+        $9,$10,$11,$12,$13,$14
       )
       RETURNING *
       `,
@@ -260,6 +272,10 @@ const createPurchase = async (data) => {
         taxAmount,
         discountAmount,
         total,
+        paymentStatus || "credit",
+        paymentMethod || "cash",
+        isPaid ? total : 0,
+        isPaid ? new Date() : null,
         notes || null,
         createdBy || null,
       ]
@@ -320,6 +336,8 @@ const updatePurchase = async (id, data) => {
     discount,
     notes,
     status,
+    paymentStatus,
+    paymentMethod,
   } = data;
 
   const result = await pool.query(
@@ -332,8 +350,10 @@ const updatePurchase = async (id, data) => {
       discount = COALESCE($4, discount),
       notes = COALESCE($5, notes),
       status = COALESCE($6, status),
+      payment_status = COALESCE($7, payment_status),
+      payment_method = COALESCE($8, payment_method),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $7
+    WHERE id = $9
     RETURNING *
     `,
     [
@@ -343,6 +363,8 @@ const updatePurchase = async (id, data) => {
       discount,
       notes,
       status,
+      paymentStatus,
+      paymentMethod,
       id,
     ]
   );
@@ -550,6 +572,34 @@ const cancelPurchase = async (id) => {
 };
 
 
+// ============================================================
+// PAY / MARK AS PAID PURCHASE ORDER
+// ============================================================
+
+const payPurchase = async (id, paymentMethod = "cash") => {
+  const result = await pool.query(
+    `
+    UPDATE purchase_orders
+    SET
+      payment_status = 'paid',
+      payment_method = COALESCE($1, payment_method, 'cash'),
+      paid_amount = total,
+      paid_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $2
+    RETURNING *
+    `,
+    [paymentMethod, id]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return getPurchaseById(id);
+};
+
+
 module.exports = {
   getAllSuppliers,
   getSupplierById,
@@ -561,4 +611,6 @@ module.exports = {
   updatePurchase,
   receivePurchase,
   cancelPurchase,
+
+  payPurchase,
 };

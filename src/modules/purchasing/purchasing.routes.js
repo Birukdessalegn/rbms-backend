@@ -65,4 +65,11 @@ router.post(
 );
 
 
+// Mark purchase as PAID
+router.put(
+  "/:id/pay",
+  purchasingController.payPurchase
+);
+
+
 module.exports = router;

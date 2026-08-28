@@ -292,6 +292,47 @@ const cancelPurchase = async (req, res) => {
 };
 
 
+// ============================================================
+// PAY PURCHASE (MARK AS PAID)
+// ============================================================
+
+const payPurchase = async (req, res) => {
+  try {
+    const {
+      paymentMethod,
+    } = req.body;
+
+    const purchase =
+      await purchasingService.payPurchase(
+        req.params.id,
+        paymentMethod || "cash"
+      );
+
+    if (!purchase) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase order not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Purchase payment marked as PAID successfully",
+      purchase,
+    });
+
+  } catch (error) {
+    console.error("Pay purchase error:", error);
+
+    res.status(400).json({
+      success: false,
+      message:
+        error.message || "Failed to update purchase payment",
+    });
+  }
+};
+
+
 module.exports = {
   getSuppliers,
   getSupplier,
@@ -303,4 +344,7 @@ module.exports = {
   updatePurchase,
   receivePurchase,
   cancelPurchase,
+
+  payPurchase,
 };
+  

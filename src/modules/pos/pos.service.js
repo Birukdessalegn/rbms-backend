@@ -257,7 +257,7 @@ const createOrder = async (order) => {
         $8,
         $9,
         'pending',
-      
+        'pending',
         $10
       )
       RETURNING *

@@ -166,21 +166,22 @@ const createEmployee = async (employee) => {
 
 
     // -----------------------------------------------------
-    // CHECK ROLE
+    // CHECK ROLE (Support both integer role ID and role name string)
     // -----------------------------------------------------
 
+    const isNumericRole = !isNaN(parseInt(roleId, 10)) && String(roleId).trim().match(/^[0-9]+$/);
     const roleResult = await client.query(
-      `
-      SELECT id, name
-      FROM roles
-      WHERE id = $1
-      `,
-      [roleId]
+      isNumericRole
+        ? `SELECT id, name FROM roles WHERE id = $1`
+        : `SELECT id, name FROM roles WHERE LOWER(name) = LOWER($1)`,
+      [isNumericRole ? parseInt(roleId, 10) : String(roleId).trim()]
     );
 
     if (roleResult.rows.length === 0) {
-      throw new Error("Invalid role");
+      throw new Error("Invalid role specified");
     }
+
+    const actualRoleId = roleResult.rows[0].id;
 
 
     // -----------------------------------------------------
@@ -217,7 +218,7 @@ const createEmployee = async (employee) => {
         username,
         email || null,
         passwordHash,
-        roleId,
+        actualRoleId,
         "active",
       ]
     );
@@ -268,7 +269,7 @@ const createEmployee = async (employee) => {
         phone || null,
         email || null,
         address || null,
-        roleId,
+        actualRoleId,
         departmentId || null,
         hireDate || null,
         salary || 0,

@@ -17,6 +17,18 @@ router.post(
 );
 
 
+// Menu
+router.get(
+  "/menu",
+  productsController.getMenu
+);
+
+router.put(
+  "/:id/menu",
+  productsController.updateProductMenu
+);
+
+
 // Products
 router.get(
   "/",

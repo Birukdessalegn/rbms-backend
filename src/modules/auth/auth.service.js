@@ -49,6 +49,19 @@ const loginUser = async (username, password) => {
     [username]
   );
 
+
+console.log("LOGIN DEBUG:", {
+  username: user.username,
+  userId: user.id,
+  roleId: user.role_id,
+  status: user.status,
+  passwordMatch: await bcrypt.compare(
+    password,
+    user.password_hash
+  ),
+  hashPrefix: user.password_hash?.substring(0, 7),
+});
+
   if (result.rows.length === 0) {
     throw new Error("Invalid username or password");
   }
@@ -66,7 +79,10 @@ const loginUser = async (username, password) => {
     user.password_hash
   );
 
-  if (!passwordMatch) {
+  if (!await bcrypt.compare(
+    password,
+    user.password_hash
+  )) {
     throw new Error("Invalid username or password");
   }
 

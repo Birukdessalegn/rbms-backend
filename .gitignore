@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Uploads / Media files
+uploads/*
+!uploads/.gitkeep
+!uploads/**/.gitkeep
+
+# Runtime data & temporary files
+pids
+*.pid
+*.seed
+*.pid.lock
+.cache/
+tmp/
+temp/
+
+# Coverage & testing reports
+coverage/
+.nyc_output/
+*.lcov
+
+# IDEs & Code Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Operating System files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db

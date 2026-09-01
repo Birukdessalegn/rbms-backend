@@ -86,6 +86,11 @@ o.payment_status,
 // ============================================================
 
 const getKitchenOrderById = async (id) => {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId)) {
+    return null;
+  }
+
   const orderResult = await pool.query(
     `
     SELECT
@@ -115,7 +120,7 @@ o.payment_status,
 
     WHERE ko.id = $1
     `,
-    [id]
+    [numericId]
   );
 
   if (orderResult.rows.length === 0) {
@@ -150,7 +155,7 @@ o.payment_status,
 
     ORDER BY koi.id ASC
     `,
-    [id]
+    [numericId]
   );
 
   order.items = itemsResult.rows;

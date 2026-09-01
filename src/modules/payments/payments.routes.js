@@ -4,7 +4,10 @@ const router = express.Router();
 
 const paymentsController =
   require("./payments.controller");
+const authenticate = require("../../middleware/auth.middleware");
 
+// Protect payment routes with authentication
+router.use(authenticate);
 
 // ============================================================
 // PAYMENTS
@@ -17,9 +20,14 @@ router.get(
 );
 
 
-// Get payments for a specific order
+// Get payments for a specific order (both singular and plural aliases)
 router.get(
   "/order/:orderId",
+  paymentsController.getPaymentsByOrder
+);
+
+router.get(
+  "/orders/:orderId",
   paymentsController.getPaymentsByOrder
 );
 

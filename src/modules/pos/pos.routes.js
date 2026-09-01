@@ -38,9 +38,15 @@ router.put(
   posController.updateOrderStatus
 );
 
-// Make payment
+// Make payment (supports both :id and :orderId URL parameters)
 router.post(
   "/orders/:id/payment",
+  authenticate,
+  posController.createPayment
+);
+
+router.post(
+  "/orders/:orderId/payment",
   authenticate,
   posController.createPayment
 );

@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 const productsController = require("./products.controller");
+const { uploadProductImage } = require("../../middleware/upload.middleware");
 
 
 // Categories
@@ -29,6 +30,14 @@ router.put(
 );
 
 
+// Image Upload
+router.post(
+  "/upload",
+  uploadProductImage.single("image"),
+  productsController.uploadImage
+);
+
+
 // Products
 router.get(
   "/",
@@ -42,11 +51,13 @@ router.get(
 
 router.post(
   "/",
+  uploadProductImage.single("image"),
   productsController.createProduct
 );
 
 router.put(
   "/:id",
+  uploadProductImage.single("image"),
   productsController.updateProduct
 );
 

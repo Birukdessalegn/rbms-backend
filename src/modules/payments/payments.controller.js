@@ -126,9 +126,10 @@ const createPayment = async (req, res) => {
     }
 
     const payment =
-      await paymentsService.createPayment(
-        req.body
-      );
+      await paymentsService.createPayment({
+        ...req.body,
+        receivedBy: req.user?.id || req.body.receivedBy,
+      });
 
     res.status(201).json({
       success: true,

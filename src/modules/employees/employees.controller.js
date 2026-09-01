@@ -54,20 +54,21 @@ const getEmployee = async (req, res) => {
 // POST /api/employees
 const createEmployee = async (req, res) => {
   try {
+    console.log("CREATE EMPLOYEE PAYLOAD:", req.body);
+
     const {
-      employeeCode,
-      firstName,
-      lastName,
       username,
       password,
-      roleId,
     } = req.body;
 
-    if (!employeeCode || !firstName || !lastName) {
+    const targetFirstName = req.body.firstName || req.body.first_name;
+    const targetLastName = req.body.lastName || req.body.last_name;
+    const targetRole = req.body.roleName || req.body.role || req.body.roleId || req.body.role_id;
+
+    if (!targetFirstName || !targetLastName) {
       return res.status(400).json({
         success: false,
-        message:
-          "Employee code, first name and last name are required",
+        message: "First name and last name are required",
       });
     }
 
@@ -79,7 +80,7 @@ const createEmployee = async (req, res) => {
       });
     }
 
-    if (!roleId) {
+    if (!targetRole) {
       return res.status(400).json({
         success: false,
         message: "Role is required",

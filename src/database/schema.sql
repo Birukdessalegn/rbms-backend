@@ -362,6 +362,8 @@ CREATE TABLE IF NOT EXISTS products (
 
     cost_price NUMERIC(12,2) DEFAULT 0,
 
+    staff_price NUMERIC(12,2) DEFAULT 0,
+
     unit VARCHAR(30) DEFAULT 'pcs',
 
     image_url TEXT,
@@ -369,6 +371,10 @@ CREATE TABLE IF NOT EXISTS products (
     is_available BOOLEAN DEFAULT TRUE,
 
     is_active BOOLEAN DEFAULT TRUE,
+
+    menu_type VARCHAR(30) DEFAULT 'both',
+
+    is_todays_special BOOLEAN DEFAULT FALSE,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -477,6 +483,14 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 
     status purchase_status DEFAULT 'draft',
 
+    payment_status VARCHAR(30) DEFAULT 'credit',
+
+    payment_method VARCHAR(50) DEFAULT 'cash',
+
+    paid_amount NUMERIC(12,2) DEFAULT 0,
+
+    paid_at TIMESTAMP,
+
     notes TEXT,
 
     created_by UUID REFERENCES users(id),
@@ -523,6 +537,8 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
     location VARCHAR(100),
 
     status VARCHAR(30) DEFAULT 'available',
+
+    current_waiter_id INTEGER REFERENCES employees(id),
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -751,7 +767,11 @@ CREATE TABLE IF NOT EXISTS payments (
 
     paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    received_by UUID REFERENCES users(id)
+    received_by UUID REFERENCES users(id),
+
+    image_url TEXT,
+
+    receipt_image TEXT
 );
 
 
@@ -979,6 +999,9 @@ ON leave_requests(start_date, end_date);
 CREATE INDEX IF NOT EXISTS idx_products_category
 ON products(category_id);
 
+CREATE INDEX IF NOT EXISTS idx_products_menu_type
+ON products(menu_type);
+
 CREATE INDEX IF NOT EXISTS idx_inventory_product
 ON inventory(product_id);
 
@@ -1008,6 +1031,7 @@ ON notifications(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_notifications_unread
 ON notifications(user_id, is_read);
+
 
 -- ============================================================
 -- CASHIER SHIFTS & RECONCILIATION

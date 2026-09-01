@@ -26,7 +26,12 @@ const getAllOrders = async () => {
       rt.table_number,
 
       e.first_name AS waiter_first_name,
-      e.last_name AS waiter_last_name
+      e.last_name AS waiter_last_name,
+
+      COALESCE(
+        (SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid'),
+        0
+      ) AS paid_amount
 
     FROM orders o
 
@@ -39,7 +44,45 @@ const getAllOrders = async () => {
     ORDER BY o.created_at DESC
   `);
 
-  return result.rows;
+  const orders = result.rows;
+
+  if (orders.length > 0) {
+    const orderIds = orders.map((o) => o.id);
+    const paymentsResult = await pool.query(
+      `
+      SELECT
+        id,
+        order_id,
+        amount,
+        payment_method,
+        reference,
+        status,
+        paid_at,
+        COALESCE(receipt_image, image_url) AS image_url,
+        COALESCE(receipt_image, image_url) AS receipt_image,
+        COALESCE(receipt_image, image_url) AS receipt_url,
+        (COALESCE(receipt_image, image_url) IS NOT NULL) AS has_receipt
+      FROM payments
+      WHERE order_id = ANY($1::int[])
+      ORDER BY paid_at DESC
+      `,
+      [orderIds]
+    );
+
+    const paymentsByOrderId = {};
+    for (const payment of paymentsResult.rows) {
+      if (!paymentsByOrderId[payment.order_id]) {
+        paymentsByOrderId[payment.order_id] = [];
+      }
+      paymentsByOrderId[payment.order_id].push(payment);
+    }
+
+    for (const order of orders) {
+      order.payments = paymentsByOrderId[order.id] || [];
+    }
+  }
+
+  return orders;
 };
 
 
@@ -138,7 +181,11 @@ const getOrderById = async (id) => {
       payment_method,
       reference,
       status,
-      paid_at
+      paid_at,
+      COALESCE(receipt_image, image_url) AS image_url,
+      COALESCE(receipt_image, image_url) AS receipt_image,
+      COALESCE(receipt_image, image_url) AS receipt_url,
+      (COALESCE(receipt_image, image_url) IS NOT NULL) AS has_receipt
     FROM payments
     WHERE order_id = $1
     ORDER BY paid_at DESC
@@ -206,22 +253,54 @@ const createOrder = async (order) => {
 
 
     // ============================================================
-    // VALIDATE & SANITIZE TABLE ID
+    // VALIDATE TABLE ID & ENFORCE WAITER TABLE OWNERSHIP
     // ============================================================
     let validTableId = null;
     if (tableId && Number.isInteger(Number(tableId)) && Number(tableId) > 0) {
       const tableCheck = await client.query(
         `
-        SELECT id
-        FROM restaurant_tables
-        WHERE id = $1
-        LIMIT 1
+        SELECT
+          t.id,
+          t.table_number,
+          t.status,
+          t.current_waiter_id,
+          e.first_name AS assigned_first_name,
+          e.last_name AS assigned_last_name
+        FROM restaurant_tables t
+        LEFT JOIN employees e
+          ON t.current_waiter_id = e.id
+        WHERE t.id = $1
+        FOR UPDATE OF t
         `,
         [Number(tableId)]
       );
 
       if (tableCheck.rows.length > 0) {
-        validTableId = tableCheck.rows[0].id;
+        const targetTable = tableCheck.rows[0];
+        validTableId = targetTable.id;
+
+        const roleName = String(order.user?.role || "").toLowerCase();
+        const isElevatedRole =
+          roleName.includes("admin") ||
+          roleName.includes("manager") ||
+          roleName.includes("cashier");
+
+        if (
+          targetTable.status === "occupied" &&
+          targetTable.current_waiter_id &&
+          employeeId &&
+          Number(targetTable.current_waiter_id) !== Number(employeeId) &&
+          !isElevatedRole
+        ) {
+          const assignedName =
+            [targetTable.assigned_first_name, targetTable.assigned_last_name]
+              .filter(Boolean)
+              .join(" ") || `Waiter #${targetTable.current_waiter_id}`;
+
+          throw new Error(
+            `Table ${targetTable.table_number} is currently occupied by ${assignedName}. You cannot place orders on another waiter's table.`
+          );
+        }
       }
     }
 
@@ -427,8 +506,18 @@ const createOrder = async (order) => {
     // ============================================================
 
     const calculatedDiscount = Number(discount || 0);
-    const calculatedTax = Number(tax || 0);
-    const calculatedTotal = calculatedSubtotal - calculatedDiscount + calculatedTax;
+    let calculatedTax = Number(tax || 0);
+
+    // If tax is not provided or is 0, auto-calculate 15% VAT + 10% Service Charge (25% total fees)
+    if (calculatedTax === 0) {
+      const vat = Number((calculatedSubtotal * 0.15).toFixed(2));
+      const serviceCharge = Number((calculatedSubtotal * 0.10).toFixed(2));
+      calculatedTax = Number((vat + serviceCharge).toFixed(2));
+    }
+
+    const calculatedTotal = Number(
+      (calculatedSubtotal - calculatedDiscount + calculatedTax).toFixed(2)
+    );
 
     const updatedOrderResult = await client.query(
       `
@@ -584,10 +673,10 @@ const createOrder = async (order) => {
       await client.query(
         `
         UPDATE restaurant_tables
-        SET status = 'occupied'
-        WHERE id = $1
+        SET status = 'occupied', current_waiter_id = $1
+        WHERE id = $2
         `,
-        [validTableId]
+        [employeeId, validTableId]
       );
     }
 
@@ -637,17 +726,29 @@ const updateOrderStatus = async (id, status) => {
 };
 
 
-// ============================================================
-// CREATE PAYMENT
-// ============================================================
-
 const createPayment = async (orderId, data) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    const { amount, paymentMethod, reference, receivedBy } = data;
+    const { amount, paymentMethod, reference, receivedBy, status } = data;
+    const finalImageUrl =
+      data.receiptImage ||
+      data.imageUrl ||
+      data.image_url ||
+      data.receipt_image ||
+      data.receiptUrl ||
+      data.receipt_url ||
+      data.proofImage ||
+      data.proof_image ||
+      null;
+
+    let validReceivedBy = null;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (receivedBy && uuidRegex.test(String(receivedBy))) {
+      validReceivedBy = receivedBy;
+    }
 
     // Validate Order ID
     const numericOrderId = Number(orderId);
@@ -667,12 +768,13 @@ const createPayment = async (orderId, data) => {
       throw new Error("Payment method is required");
     }
 
-    // Find Order
+    // 1. Fetch Order with FOR UPDATE lock
     const orderResult = await client.query(
       `
-      SELECT id, total, payment_status, table_id
+      SELECT id, total, payment_status, status, table_id
       FROM orders
       WHERE id = $1
+      FOR UPDATE
       `,
       [numericOrderId]
     );
@@ -682,9 +784,9 @@ const createPayment = async (orderId, data) => {
     }
 
     const order = orderResult.rows[0];
-    const orderTotal = Number(order.total);
+    let orderTotal = Number(order.total || 0);
 
-    // Get Previous Payments
+    // 2. Calculate Previously Paid Amount
     const paidResult = await client.query(
       `
       SELECT COALESCE(SUM(amount), 0) AS paid_amount
@@ -694,17 +796,31 @@ const createPayment = async (orderId, data) => {
       [numericOrderId]
     );
 
-    const paidAmount = Number(paidResult.rows[0].paid_amount || 0);
-    const remainingAmount = orderTotal - paidAmount;
+    const alreadyPaid = Number(paidResult.rows[0].paid_amount || 0);
 
-    // Prevent Overpayment (with 0.05 ETB rounding tolerance)
-    if (paymentAmount > remainingAmount + 0.05) {
+    // Update order total if payment amount exceeds stored DB total
+    if (alreadyPaid + paymentAmount > orderTotal) {
+      await client.query(
+        `
+        UPDATE orders
+        SET total = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        `,
+        [alreadyPaid + paymentAmount, numericOrderId]
+      );
+      orderTotal = alreadyPaid + paymentAmount;
+    }
+
+    const currentRemaining = orderTotal - alreadyPaid;
+
+    if (paymentAmount > currentRemaining + 0.05) {
       throw new Error(
-        `Payment exceeds remaining balance of ${remainingAmount.toFixed(2)}`
+        `Payment exceeds remaining balance of ${currentRemaining.toFixed(2)}`
       );
     }
 
-    // Create Payment Record
+    // 3. Insert Payment Ledger Entry
+    const paymentStatusParam = status || "paid";
     const paymentResult = await client.query(
       `
       INSERT INTO payments (
@@ -713,46 +829,70 @@ const createPayment = async (orderId, data) => {
         payment_method,
         reference,
         status,
-        received_by
+        received_by,
+        image_url,
+        receipt_image,
+        paid_at
       )
-      VALUES ($1, $2, $3, $4, 'paid', $5)
-      RETURNING *
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, CURRENT_TIMESTAMP)
+      RETURNING *, paid_at AS created_at
       `,
       [
         numericOrderId,
         paymentAmount,
         paymentMethod,
         reference || null,
-        receivedBy || null,
+        paymentStatusParam,
+        validReceivedBy,
+        finalImageUrl,
       ]
     );
 
-    const newPaidAmount = paidAmount + paymentAmount;
-    let paymentStatus = "partial";
+    const createdPayment = paymentResult.rows[0];
 
-    if (newPaidAmount >= orderTotal - 0.05) {
-      paymentStatus = "paid";
-    }
+    // 4. Compute Cumulative Paid Amount & Remaining Balance
+    const newPaidResult = await client.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) AS paid_amount
+      FROM payments
+      WHERE order_id = $1 AND status = 'paid'
+      `,
+      [numericOrderId]
+    );
 
-    // Update Order Status
+    const totalPaid = Number(newPaidResult.rows[0].paid_amount || 0);
+    const remainingBalance = Math.max(
+      Number((orderTotal - totalPaid).toFixed(2)),
+      0
+    );
+    const isFullyPaid = remainingBalance <= 0.05;
+
+    // 5. Update Order & Table Statuses
+    const dbPaymentStatus = isFullyPaid
+      ? "paid"
+      : totalPaid > 0
+      ? "partial"
+      : "pending";
+    const dbOrderStatus = isFullyPaid ? "completed" : order.status;
+
     await client.query(
       `
       UPDATE orders
       SET
         payment_status = $1,
-        status = CASE WHEN $3 = 'paid' THEN 'completed' ELSE status END,
+        status = $2,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
+      WHERE id = $3
       `,
-      [paymentStatus, numericOrderId, paymentStatus]
+      [dbPaymentStatus, dbOrderStatus, numericOrderId]
     );
 
-    // Release Table
-    if (paymentStatus === "paid" && order.table_id) {
+    // Release table if order is fully settled
+    if (isFullyPaid && order.table_id) {
       await client.query(
         `
         UPDATE restaurant_tables
-        SET status = 'available'
+        SET status = 'available', current_waiter_id = NULL
         WHERE id = $1
         `,
         [order.table_id]
@@ -761,13 +901,15 @@ const createPayment = async (orderId, data) => {
 
     await client.query("COMMIT");
 
-    return paymentResult.rows[0];
-
+    return {
+      payment: createdPayment,
+      totalPaid,
+      remainingBalance,
+      isFullyPaid,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
-
     console.error("CREATE PAYMENT ERROR:", error);
-
     throw error;
   } finally {
     client.release();
@@ -781,9 +923,28 @@ const createPayment = async (orderId, data) => {
 
 const getAllTables = async () => {
   const result = await pool.query(`
-    SELECT id, table_number, capacity, location, status, created_at
-    FROM restaurant_tables
-    ORDER BY id ASC
+    SELECT
+      t.id,
+      t.table_number,
+      t.capacity,
+      t.location,
+      t.status,
+      t.current_waiter_id,
+      t.created_at,
+
+      e.first_name AS waiter_first_name,
+      e.last_name AS waiter_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS current_waiter_name
+
+    FROM restaurant_tables t
+
+    LEFT JOIN employees e
+      ON t.current_waiter_id = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
+
+    ORDER BY t.id ASC
   `);
 
   return result.rows;

@@ -169,33 +169,45 @@ const getSalesChart = async () => {
 
 
 // ============================================================
-// TOP PRODUCTS
+// TOP PRODUCTS & ITEMIZED REVENUE BREAKDOWN
 // ============================================================
 
-const getTopProducts = async () => {
-  const result = await pool.query(`
+const getTopProducts = async (limit = 10) => {
+  const result = await pool.query(
+    `
     SELECT
       p.id,
+      p.product_code,
       p.name,
-      SUM(oi.quantity) AS quantity_sold,
-      SUM(oi.total) AS revenue
+      p.price,
+      p.unit,
+      p.image_url,
+      pc.name AS category_name,
+      pc.type AS category_type,
+      COALESCE(SUM(oi.quantity), 0)::INTEGER AS quantity_sold,
+      COALESCE(SUM(oi.total_price), SUM(oi.subtotal), SUM(oi.unit_price * oi.quantity), 0)::NUMERIC(12,2) AS revenue
 
     FROM order_items oi
 
     JOIN products p
       ON oi.product_id = p.id
 
+    LEFT JOIN product_categories pc
+      ON p.category_id = pc.id
+
     JOIN orders o
       ON oi.order_id = o.id
 
     WHERE o.status != 'cancelled'
 
-    GROUP BY p.id, p.name
+    GROUP BY p.id, p.product_code, p.name, p.price, p.unit, p.image_url, pc.name, pc.type
 
-    ORDER BY quantity_sold DESC
+    ORDER BY revenue DESC
 
-    LIMIT 5
-  `);
+    LIMIT $1
+  `,
+    [limit]
+  );
 
   return result.rows;
 };

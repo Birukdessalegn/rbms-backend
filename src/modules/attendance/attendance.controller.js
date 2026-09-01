@@ -3,7 +3,7 @@ const attendanceService = require("./attendance.service");
 // GET /api/attendance
 const getAttendance = async (req, res) => {
   try {
-    const attendance = await attendanceService.getAllAttendance();
+    const attendance = await attendanceService.getAllAttendance(req.query);
 
     res.json({
       success: true,

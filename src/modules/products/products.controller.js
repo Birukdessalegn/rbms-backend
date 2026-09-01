@@ -51,13 +51,38 @@ const getProduct = async (req, res) => {
 };
 
 
+// POST /api/products/upload
+const uploadImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image file uploaded",
+      });
+    }
+
+    const imageUrl = `/uploads/products/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      message: "Image uploaded successfully",
+      imageUrl,
+    });
+  } catch (error) {
+    console.error("Upload image error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload image",
+    });
+  }
+};
+
+
 // POST /api/products
 const createProduct = async (req, res) => {
   try {
-    const {
-      name,
-      price,
-    } = req.body;
+    const { name, price } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({
@@ -66,8 +91,12 @@ const createProduct = async (req, res) => {
       });
     }
 
-    const product =
-      await productsService.createProduct(req.body);
+    const productData = { ...req.body };
+    if (req.file) {
+      productData.imageUrl = `/uploads/products/${req.file.filename}`;
+    }
+
+    const product = await productsService.createProduct(productData);
 
     res.status(201).json({
       success: true,
@@ -88,11 +117,15 @@ const createProduct = async (req, res) => {
 // PUT /api/products/:id
 const updateProduct = async (req, res) => {
   try {
-    const product =
-      await productsService.updateProduct(
-        req.params.id,
-        req.body
-      );
+    const productData = { ...req.body };
+    if (req.file) {
+      productData.imageUrl = `/uploads/products/${req.file.filename}`;
+    }
+
+    const product = await productsService.updateProduct(
+      req.params.id,
+      productData
+    );
 
     if (!product) {
       return res.status(404).json({
@@ -201,6 +234,63 @@ const createCategory = async (req, res) => {
 };
 
 
+// GET /api/products/menu
+const getMenu = async (req, res) => {
+  try {
+    const { type } = req.query;
+
+    const menuItems =
+      await productsService.getMenu(type);
+
+    res.json({
+      success: true,
+      count: menuItems.length,
+      menu: menuItems,
+    });
+  } catch (error) {
+    console.error("Get menu error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch menu",
+    });
+  }
+};
+
+
+// PUT /api/products/:id/menu
+const updateProductMenu = async (req, res) => {
+  try {
+    const product =
+      await productsService.updateProductMenu(
+        req.params.id,
+        req.body
+      );
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Product menu settings updated successfully",
+      product,
+    });
+  } catch (error) {
+    console.error("Update product menu error:", error);
+
+    res.status(400).json({
+      success: false,
+      message:
+        error.message || "Failed to update product menu settings",
+    });
+  }
+};
+
+
 module.exports = {
   getProducts,
   getProduct,
@@ -209,4 +299,8 @@ module.exports = {
   deleteProduct,
   getCategories,
   createCategory,
-};  
+
+  getMenu,
+  updateProductMenu,
+  uploadImage,
+};

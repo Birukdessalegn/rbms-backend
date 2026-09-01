@@ -7,12 +7,25 @@ const pool = require("../../config/database");
 const getAllTables = async () => {
   const result = await pool.query(`
     SELECT
-      id,
-      table_number,
-      capacity,
-      status
-    FROM restaurant_tables
-    ORDER BY id ASC
+      t.id,
+      t.table_number,
+      t.capacity,
+      t.status,
+      t.current_waiter_id,
+
+      e.first_name AS waiter_first_name,
+      e.last_name AS waiter_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS current_waiter_name
+
+    FROM restaurant_tables t
+
+    LEFT JOIN employees e
+      ON t.current_waiter_id = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
+
+    ORDER BY t.id ASC
   `);
 
   return result.rows;
@@ -26,12 +39,25 @@ const getTableById = async (id) => {
   const result = await pool.query(
     `
     SELECT
-      id,
-      table_number,
-      capacity,
-      status
-    FROM restaurant_tables
-    WHERE id = $1
+      t.id,
+      t.table_number,
+      t.capacity,
+      t.status,
+      t.current_waiter_id,
+
+      e.first_name AS waiter_first_name,
+      e.last_name AS waiter_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS current_waiter_name
+
+    FROM restaurant_tables t
+
+    LEFT JOIN employees e
+      ON t.current_waiter_id = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
+
+    WHERE t.id = $1
     `,
     [id]
   );

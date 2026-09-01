@@ -74,8 +74,9 @@ const createOrder = async (req, res) => {
     const order = await posService.createOrder({
       ...req.body,
 
-      // JWT user ID
-      waiterId: req.user.id,
+      // JWT user ID & user object for RBAC checks
+      waiterId: req.user?.id,
+      user: req.user,
     });
 
     res.status(201).json({
@@ -171,12 +172,7 @@ const updateOrderStatus = async (req, res) => {
 
 const createPayment = async (req, res) => {
   try {
-
-    const {
-      amount,
-      paymentMethod,
-    } = req.body;
-
+    const { amount, paymentMethod } = req.body;
 
     if (!amount || !paymentMethod) {
       return res.status(400).json({
@@ -185,28 +181,30 @@ const createPayment = async (req, res) => {
       });
     }
 
+    const orderId = req.params.id || req.params.orderId;
 
-    const payment = await posService.createPayment(
-      req.params.id,
-      req.body
-    );
-
+    const result = await posService.createPayment(orderId, {
+      ...req.body,
+      receivedBy: req.user?.id || req.body.receivedBy,
+    });
 
     res.status(201).json({
       success: true,
-      message: "Payment recorded successfully",
-      payment,
+      message: result.isFullyPaid
+        ? "Order fully settled!"
+        : "Partial payment recorded.",
+      payment: result.payment,
+      total_paid: result.totalPaid,
+      remaining_balance: result.remainingBalance,
+      is_fully_paid: result.isFullyPaid,
     });
-
   } catch (error) {
-
     console.error("Create payment error:", error);
 
     res.status(500).json({
       success: false,
       message: error.message || "Failed to record payment",
     });
-
   }
 };
 

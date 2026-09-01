@@ -45,7 +45,7 @@ const loginUser = async (username, password) => {
       r.name AS role
      FROM users u
      LEFT JOIN roles r ON u.role_id = r.id
-     WHERE u.username = $1`,
+     WHERE LOWER(TRIM(u.username)) = LOWER(TRIM($1))`,
     [username]
   );
 
@@ -81,6 +81,45 @@ const loginUser = async (username, password) => {
 
   if (!passwordMatch) {
     throw new Error("Invalid username or password");
+  }
+
+  // Enforce attendance check-in for Waiters and Bartenders
+  const roleName = user.role?.toLowerCase();
+  if (roleName === "waiter" || roleName === "bartender") {
+    const employeeRes = await pool.query(
+      "SELECT id FROM employees WHERE user_id = $1",
+      [user.id]
+    );
+
+    if (employeeRes.rows.length === 0) {
+      throw new Error(
+        "No employee record associated with this account. Please contact management."
+      );
+    }
+
+    const employeeId = employeeRes.rows[0].id;
+
+    // Check if there is an active check-in record for current shift
+    const attendanceCheck = await pool.query(
+      `
+      SELECT id FROM attendance
+      WHERE employee_id = $1
+        AND attendance_date = (
+          CASE
+            WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+            ELSE CURRENT_DATE
+          END
+        )
+        AND check_in IS NOT NULL
+      `,
+      [employeeId]
+    );
+
+    if (attendanceCheck.rows.length === 0) {
+      throw new Error(
+        "Attendance check-in required before logging in. Please ask HR or Management to check you in first."
+      );
+    }
   }
 
   // Create JWT

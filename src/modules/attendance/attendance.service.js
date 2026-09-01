@@ -1,8 +1,10 @@
 const pool = require("../../config/database");
 
-// Get all attendance records
-const getAllAttendance = async () => {
-  const result = await pool.query(`
+// Get attendance records with filtering & pagination
+const getAllAttendance = async (filters = {}) => {
+  const { startDate, endDate, employeeId, page = 1, limit = 50 } = filters;
+
+  let query = `
     SELECT
       a.id,
       a.employee_id,
@@ -18,18 +20,46 @@ const getAllAttendance = async () => {
       a.status,
       a.notes,
       a.recorded_by,
+      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours,
       a.created_at,
       a.updated_at
     FROM attendance a
     JOIN employees e ON a.employee_id = e.id
     LEFT JOIN departments d ON e.department_id = d.id
     LEFT JOIN roles r ON e.role_id = r.id
-    ORDER BY a.attendance_date DESC, a.check_in DESC
-  `);
+    WHERE 1=1
+  `;
+  const queryParams = [];
 
+  if (startDate) {
+    queryParams.push(startDate);
+    query += ` AND a.attendance_date >= $${queryParams.length}`;
+  }
+  if (endDate) {
+    queryParams.push(endDate);
+    query += ` AND a.attendance_date <= $${queryParams.length}`;
+  }
+  if (employeeId) {
+    queryParams.push(employeeId);
+    query += ` AND a.employee_id = $${queryParams.length}`;
+  }
+
+  query += ` ORDER BY a.attendance_date DESC, a.check_in DESC`;
+
+  if (limit) {
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 50;
+    const offset = (pageNum - 1) * limitNum;
+
+    queryParams.push(limitNum);
+    query += ` LIMIT $${queryParams.length}`;
+    queryParams.push(offset);
+    query += ` OFFSET $${queryParams.length}`;
+  }
+
+  const result = await pool.query(query, queryParams);
   return result.rows;
 };
-
 
 // Get attendance by employee
 const getEmployeeAttendance = async (employeeId) => {
@@ -45,7 +75,8 @@ const getEmployeeAttendance = async (employeeId) => {
       a.check_in,
       a.check_out,
       a.status,
-      a.notes
+      a.notes,
+      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours
     FROM attendance a
     JOIN employees e ON a.employee_id = e.id
     WHERE a.employee_id = $1
@@ -57,8 +88,7 @@ const getEmployeeAttendance = async (employeeId) => {
   return result.rows;
 };
 
-
-// Get today's attendance
+// Get current shift attendance (today or overnight shift starting yesterday)
 const getTodayAttendance = async () => {
   const result = await pool.query(`
     SELECT
@@ -73,23 +103,47 @@ const getTodayAttendance = async () => {
       a.check_in,
       a.check_out,
       a.status,
-      a.notes
+      a.notes,
+      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours
     FROM attendance a
     JOIN employees e ON a.employee_id = e.id
     LEFT JOIN departments d ON e.department_id = d.id
     LEFT JOIN roles r ON e.role_id = r.id
-    WHERE a.attendance_date = CURRENT_DATE
+    WHERE a.attendance_date = (
+      CASE
+        WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+        ELSE CURRENT_DATE
+      END
+    )
     ORDER BY a.check_in ASC
   `);
 
   return result.rows;
 };
 
-
-// Check in employee
+// Check in employee with club night shift & grace period rules:
+// - Shift start: 6:00 PM (18:00)
+// - Early check-in starts: 5:50 PM (17:50)
+// - Grace period until: 6:20 PM (18:20) -> 'present'
+// - After 6:20 PM (18:20) up to 7:00 AM -> 'late'
+// - Shift date between 00:00 and 07:00 AM -> assigned to yesterday's date
 const checkIn = async (employeeId, notes = null) => {
   const result = await pool.query(
     `
+    WITH calc AS (
+      SELECT
+        CASE
+          WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+          ELSE CURRENT_DATE
+        END AS calc_date,
+        CASE
+          WHEN (EXTRACT(HOUR FROM CURRENT_TIME) * 60 + EXTRACT(MINUTE FROM CURRENT_TIME)) <= (18 * 60 + 20)
+               AND (EXTRACT(HOUR FROM CURRENT_TIME) * 60 + EXTRACT(MINUTE FROM CURRENT_TIME)) >= (17 * 60 + 50) THEN 'present'
+          WHEN (EXTRACT(HOUR FROM CURRENT_TIME) * 60 + EXTRACT(MINUTE FROM CURRENT_TIME)) < (17 * 60 + 50)
+               AND EXTRACT(HOUR FROM CURRENT_TIME) >= 7 THEN 'present'
+          ELSE 'late'
+        END AS calc_status
+    )
     INSERT INTO attendance (
       employee_id,
       attendance_date,
@@ -97,17 +151,17 @@ const checkIn = async (employeeId, notes = null) => {
       status,
       notes
     )
-    VALUES (
+    SELECT
       $1,
-      CURRENT_DATE,
+      calc_date,
       CURRENT_TIMESTAMP,
-      'present',
+      calc_status::attendance_status,
       $2
-    )
+    FROM calc
     ON CONFLICT (employee_id, attendance_date)
     DO UPDATE SET
       check_in = COALESCE(attendance.check_in, CURRENT_TIMESTAMP),
-      status = 'present',
+      status = EXCLUDED.status,
       notes = COALESCE(EXCLUDED.notes, attendance.notes),
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
@@ -118,8 +172,7 @@ const checkIn = async (employeeId, notes = null) => {
   return result.rows[0];
 };
 
-
-// Check out employee
+// Check out employee from their latest active check-in (open session)
 const checkOut = async (employeeId) => {
   const result = await pool.query(
     `
@@ -127,16 +180,20 @@ const checkOut = async (employeeId) => {
     SET
       check_out = CURRENT_TIMESTAMP,
       updated_at = CURRENT_TIMESTAMP
-    WHERE employee_id = $1
-      AND attendance_date = CURRENT_DATE
-    RETURNING *
+    WHERE id = (
+      SELECT id FROM attendance
+      WHERE employee_id = $1 AND check_out IS NULL
+      ORDER BY check_in DESC
+      LIMIT 1
+    )
+    RETURNING *,
+      ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in))/3600.0, 2) AS total_hours
     `,
     [employeeId]
   );
 
   return result.rows[0];
 };
-
 
 // Create attendance manually
 const createAttendance = async (data) => {
@@ -161,7 +218,7 @@ const createAttendance = async (data) => {
       notes,
       recorded_by
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    VALUES ($1, $2, $3, $4, $5::attendance_status, $6, $7)
     RETURNING *
     `,
     [
@@ -177,7 +234,6 @@ const createAttendance = async (data) => {
 
   return result.rows[0];
 };
-
 
 module.exports = {
   getAllAttendance,

@@ -16,6 +16,10 @@ const getAllPayments = async () => {
       p.status,
       p.paid_at,
       p.received_by,
+      COALESCE(p.receipt_image, p.image_url) AS image_url,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_image,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_url,
+      (COALESCE(p.receipt_image, p.image_url) IS NOT NULL) AS has_receipt,
 
       e.first_name AS received_by_first_name,
       e.last_name AS received_by_last_name
@@ -55,7 +59,11 @@ const getPaymentById = async (id) => {
       p.reference,
       p.status,
       p.paid_at,
-      p.received_by
+      p.received_by,
+      COALESCE(p.receipt_image, p.image_url) AS image_url,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_image,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_url,
+      (COALESCE(p.receipt_image, p.image_url) IS NOT NULL) AS has_receipt
 
     FROM payments p
 
@@ -88,7 +96,11 @@ const getPaymentsByOrderId = async (orderId) => {
       p.reference,
       p.status,
       p.paid_at,
-      p.received_by
+      p.received_by,
+      COALESCE(p.receipt_image, p.image_url) AS image_url,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_image,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_url,
+      (COALESCE(p.receipt_image, p.image_url) IS NOT NULL) AS has_receipt
 
     FROM payments p
 
@@ -123,6 +135,16 @@ const createPayment = async (data) => {
       reference,
       receivedBy,
     } = data;
+    const finalImageUrl =
+      data.receiptImage ||
+      data.imageUrl ||
+      data.image_url ||
+      data.receipt_image ||
+      data.receiptUrl ||
+      data.receipt_url ||
+      data.proofImage ||
+      data.proof_image ||
+      null;
 
     // --------------------------------------------------------
     // Check order
@@ -170,19 +192,37 @@ const createPayment = async (data) => {
     );
 
     const alreadyPaid = Number(
-      paidResult.rows[0].paid_amount
+      paidResult.rows[0].paid_amount || 0
     );
 
-    const orderTotal = Number(order.total);
+    let orderTotal = Number(order.total || 0);
     const paymentAmount = Number(amount);
+
+    if (alreadyPaid + paymentAmount > orderTotal) {
+      await client.query(
+        `
+        UPDATE orders
+        SET total = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        `,
+        [alreadyPaid + paymentAmount, orderId]
+      );
+      orderTotal = alreadyPaid + paymentAmount;
+    }
 
     const remainingAmount =
       orderTotal - alreadyPaid;
 
-    if (paymentAmount > remainingAmount) {
+    if (paymentAmount > remainingAmount + 0.05) {
       throw new Error(
         `Payment exceeds remaining balance of ${remainingAmount.toFixed(2)}`
       );
+    }
+
+    let validReceivedBy = null;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (receivedBy && uuidRegex.test(String(receivedBy))) {
+      validReceivedBy = receivedBy;
     }
 
     // --------------------------------------------------------
@@ -198,7 +238,9 @@ const createPayment = async (data) => {
         reference,
         status,
         paid_at,
-        received_by
+        received_by,
+        image_url,
+        receipt_image
       )
       VALUES (
         $1,
@@ -207,7 +249,9 @@ const createPayment = async (data) => {
         $4,
         'paid',
         CURRENT_TIMESTAMP,
-        $5
+        $5,
+        $6,
+        $6
       )
       RETURNING *
       `,
@@ -216,7 +260,8 @@ const createPayment = async (data) => {
         paymentAmount,
         paymentMethod,
         reference || null,
-        receivedBy || null,
+        validReceivedBy,
+        finalImageUrl,
       ]
     );
 

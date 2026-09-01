@@ -1078,6 +1078,37 @@ ON cashier_shifts(cashier_id);
 
 
 -- ============================================================
+-- VIP CUSTOMERS & REPAYMENTS
+-- ============================================================
+
+-- 1. VIP / Credit Customer Directory Table
+CREATE TABLE IF NOT EXISTS vip_customers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(50) NOT NULL UNIQUE,
+    tier VARCHAR(50) DEFAULT 'Gold VIP',
+    credit_limit NUMERIC(12, 2) DEFAULT 10000.00,
+    current_debt NUMERIC(12, 2) DEFAULT 0.00,
+    company VARCHAR(255),
+    notes TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Repayment Transactions History Table
+CREATE TABLE IF NOT EXISTS customer_repayments (
+    id SERIAL PRIMARY KEY,
+    customer_id INT NOT NULL REFERENCES vip_customers(id) ON DELETE CASCADE,
+    amount NUMERIC(12, 2) NOT NULL,
+    payment_method VARCHAR(50) DEFAULT 'cash',
+    reference VARCHAR(255),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
 -- FINISHED
 -- ============================================================
 

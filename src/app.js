@@ -44,8 +44,8 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
+// Apply CORS middleware (handles regular & preflight requests)
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
 
 // Body Parsers & Static Files
 app.use(express.json({ limit: "10mb" }));

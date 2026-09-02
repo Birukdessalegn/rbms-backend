@@ -165,6 +165,7 @@ const checkIn = async (employeeId, notes = null) => {
     ON CONFLICT (employee_id, attendance_date)
     DO UPDATE SET
       check_in = COALESCE(attendance.check_in, CURRENT_TIMESTAMP),
+      check_out = NULL,
       status = EXCLUDED.status,
       notes = COALESCE(EXCLUDED.notes, attendance.notes),
       updated_at = CURRENT_TIMESTAMP

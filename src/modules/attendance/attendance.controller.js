@@ -37,6 +37,7 @@ const getTodayAttendance = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch today's attendance",
+      error: error.message || String(error),
     });
   }
 };

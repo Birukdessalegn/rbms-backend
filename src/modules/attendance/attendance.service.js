@@ -104,14 +104,18 @@ const getTodayAttendance = async () => {
       a.check_out,
       a.status,
       a.notes,
-      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours
+      CASE
+        WHEN a.check_out IS NOT NULL AND a.check_in IS NOT NULL THEN
+          ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2)
+        ELSE 0
+      END AS total_hours
     FROM attendance a
     JOIN employees e ON a.employee_id = e.id
     LEFT JOIN departments d ON e.department_id = d.id
     LEFT JOIN roles r ON e.role_id = r.id
     WHERE a.attendance_date = (
       CASE
-        WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
+        WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN (CURRENT_DATE - INTERVAL '1 day')::date
         ELSE CURRENT_DATE
       END
     )

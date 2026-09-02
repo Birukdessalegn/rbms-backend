@@ -1,6 +1,9 @@
 
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
 require("dotenv").config();
+
+// Parse TIMESTAMP (OID 1114) directly as string to preserve exact local time
+types.setTypeParser(1114, (val) => val);
 
 const poolConfig = process.env.DATABASE_URL
   ? {

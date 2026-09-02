@@ -351,6 +351,58 @@ const createEmployee = async (employee) => {
     // CREATE EMPLOYEE
     // -----------------------------------------------------
 
+    const employeeResult = await client.query(
+      `
+      INSERT INTO employees (
+        employee_code,
+        first_name,
+        last_name,
+        phone,
+        email,
+        address,
+        role_id,
+        department_id,
+        user_id,
+        hire_date,
+        salary,
+        status
+      )
+
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12
+      )
+
+      RETURNING *
+      `,
+      [
+        finalEmployeeCode,
+        firstName,
+        lastName,
+        phone || null,
+        email || null,
+        address || null,
+        actualRoleId,
+        actualDepartmentId,
+        user.id,
+        hireDate || null,
+        salary || 0,
+        "active",
+      ]
+    );
+
+    const createdEmployee = employeeResult.rows[0];
+
     const fullEmpRes = await client.query(
       `
       SELECT
@@ -387,11 +439,6 @@ const createEmployee = async (employee) => {
 
     const fullEmployee = fullEmpRes.rows[0] || createdEmployee;
 
-    // =========================================================
-    // COMMIT THE TRANSACTION TO PERMANENTLY SAVE DATA
-    // =========================================================
-    await client.query("COMMIT");
-
     // Return both
     return {
       employee: fullEmployee,
@@ -407,7 +454,7 @@ const createEmployee = async (employee) => {
 
   } catch (error) {
 
-    // Roll everything back on failure
+    // Roll everything back
     await client.query("ROLLBACK");
 
     throw error;

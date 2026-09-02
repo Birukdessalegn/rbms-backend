@@ -23,7 +23,8 @@ const poolConfig = process.env.DATABASE_URL
 
 const pool = new Pool(poolConfig);
 
-pool.on("connect", () => {
+pool.on("connect", (client) => {
+  client.query("SET timezone = 'Africa/Addis_Ababa'");
   console.log("✅ PostgreSQL connected");
 });
 

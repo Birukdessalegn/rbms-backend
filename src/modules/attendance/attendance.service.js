@@ -20,7 +20,7 @@ const getAllAttendance = async (filters = {}) => {
       a.status,
       a.notes,
       a.recorded_by,
-      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours,
+      ROUND((EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0)::numeric, 2) AS total_hours,
       a.created_at,
       a.updated_at
     FROM attendance a
@@ -76,7 +76,7 @@ const getEmployeeAttendance = async (employeeId) => {
       a.check_out,
       a.status,
       a.notes,
-      ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2) AS total_hours
+      ROUND((EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0)::numeric, 2) AS total_hours
     FROM attendance a
     JOIN employees e ON a.employee_id = e.id
     WHERE a.employee_id = $1
@@ -106,7 +106,7 @@ const getTodayAttendance = async () => {
       a.notes,
       CASE
         WHEN a.check_out IS NOT NULL AND a.check_in IS NOT NULL THEN
-          ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0, 2)
+          ROUND((EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600.0)::numeric, 2)
         ELSE 0
       END AS total_hours
     FROM attendance a
@@ -191,7 +191,7 @@ const checkOut = async (employeeId) => {
       LIMIT 1
     )
     RETURNING *,
-      ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in))/3600.0, 2) AS total_hours
+      ROUND((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in))/3600.0)::numeric, 2) AS total_hours
     `,
     [employeeId]
   );

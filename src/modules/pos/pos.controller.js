@@ -1,4 +1,5 @@
 const posService = require("./pos.service");
+const vipCustomersService = require("../customers/vip_customers.service");
 
 
 // ============================================================
@@ -172,13 +173,19 @@ const updateOrderStatus = async (req, res) => {
 
 const createPayment = async (req, res) => {
   try {
-    const { amount, paymentMethod } = req.body;
+    const { amount, paymentMethod, vipCustomerId, customerId } = req.body;
 
     if (!amount || !paymentMethod) {
       return res.status(400).json({
         success: false,
         message: "Amount and payment method are required",
       });
+    }
+
+    const targetVipId = vipCustomerId || customerId;
+    // If paying with VIP credit, deduct from their VIP balance
+    if ((paymentMethod === "credit" || paymentMethod === "vip") && targetVipId) {
+      await vipCustomersService.addVipDebt(targetVipId, amount);
     }
 
     const orderId = req.params.id || req.params.orderId;
@@ -201,7 +208,7 @@ const createPayment = async (req, res) => {
   } catch (error) {
     console.error("Create payment error:", error);
 
-    res.status(500).json({
+    res.status(400).json({
       success: false,
       message: error.message || "Failed to record payment",
     });

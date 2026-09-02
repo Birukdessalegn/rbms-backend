@@ -68,10 +68,48 @@ const deleteVipCustomer = async (id) => {
   return rows[0];
 };
 
+// Increases VIP spent balance when a credit purchase is made
+const addVipDebt = async (customerId, amount) => {
+  const spendAmt = Number(amount);
+  if (isNaN(spendAmt) || spendAmt <= 0) {
+    throw new Error("Invalid payment amount");
+  }
+
+  const { rows } = await pool.query(
+    `SELECT id, name, credit_limit, current_debt FROM vip_customers WHERE id = $1 AND is_active = TRUE`,
+    [customerId]
+  );
+
+  if (rows.length === 0) {
+    throw new Error("VIP Customer not found or inactive");
+  }
+
+  const customer = rows[0];
+  const availableBalance = Number(customer.credit_limit || 0) - Number(customer.current_debt || 0);
+
+  if (availableBalance < spendAmt) {
+    throw new Error(
+      `Insufficient VIP balance. Remaining balance is ${availableBalance} ETB. Ask Admin to refill.`
+    );
+  }
+
+  const query = `
+    UPDATE vip_customers
+    SET current_debt = current_debt + $1,
+        updated_at = NOW()
+    WHERE id = $2 AND is_active = TRUE
+    RETURNING *;
+  `;
+  const { rows: updatedRows } = await pool.query(query, [spendAmt, customerId]);
+  return updatedRows[0];
+};
+
 module.exports = {
   getAllVipCustomers,
   createVipCustomer,
   updateVipCustomer,
   recordRepayment,
   deleteVipCustomer,
+  addVipDebt,
 };
+

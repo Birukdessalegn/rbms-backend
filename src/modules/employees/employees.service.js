@@ -439,6 +439,8 @@ const createEmployee = async (employee) => {
 
     const fullEmployee = fullEmpRes.rows[0] || createdEmployee;
 
+    await client.query("COMMIT");
+
     // Return both
     return {
       employee: fullEmployee,

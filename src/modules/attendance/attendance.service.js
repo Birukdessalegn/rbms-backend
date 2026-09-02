@@ -111,7 +111,7 @@ const getTodayAttendance = async () => {
     LEFT JOIN roles r ON e.role_id = r.id
     WHERE a.attendance_date = (
       CASE
-        WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+        WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
         ELSE CURRENT_DATE
       END
     )
@@ -133,7 +133,7 @@ const checkIn = async (employeeId, notes = null) => {
     WITH calc AS (
       SELECT
         CASE
-          WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+          WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
           ELSE CURRENT_DATE
         END AS calc_date,
         CASE

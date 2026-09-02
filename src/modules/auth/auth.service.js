@@ -106,7 +106,7 @@ const loginUser = async (username, password) => {
       WHERE employee_id = $1
         AND attendance_date = (
           CASE
-            WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - INTERVAL '1 day'
+            WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
             ELSE CURRENT_DATE
           END
         )

@@ -136,7 +136,7 @@ const updateEmployee = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to update employee",
+      message: error.message || "Failed to update employee",
     });
   }
 };

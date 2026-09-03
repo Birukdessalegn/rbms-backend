@@ -18,6 +18,8 @@ const getAllEmployees = async () => {
       e.hire_date,
       e.salary,
       e.status,
+      e.user_id,
+      u.username,
 
       r.id AS role_id,
       r.name AS role,
@@ -32,6 +34,9 @@ const getAllEmployees = async () => {
 
     LEFT JOIN departments d
       ON e.department_id = d.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
 
     ORDER BY e.id DESC
   `);
@@ -58,6 +63,8 @@ const getEmployeeById = async (id) => {
       e.hire_date,
       e.salary,
       e.status,
+      e.user_id,
+      u.username,
 
       r.id AS role_id,
       r.name AS role,
@@ -72,6 +79,9 @@ const getEmployeeById = async (id) => {
 
     LEFT JOIN departments d
       ON e.department_id = d.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
 
     WHERE e.id = $1
     `,
@@ -476,8 +486,11 @@ const createEmployee = async (employee) => {
 const updateEmployee = async (id, employee) => {
   const {
     employeeCode,
+    employee_code,
     firstName,
+    first_name,
     lastName,
+    last_name,
     phone,
     email,
     address,
@@ -487,33 +500,77 @@ const updateEmployee = async (id, employee) => {
     roleName,
     departmentId,
     department_id,
+    department,
+    departmentName,
     hireDate,
+    hire_date,
     salary,
     status,
+    username,
+    password,
   } = employee;
 
-  const rawRole = roleName || role || roleId || role_id;
+  // 1. Resolve Role ID (prioritize name e.g. 'Chef', and map frontend IDs accurately)
   let actualRoleId = null;
+  const rawRoleStr = roleName || role;
+  if (rawRoleStr && isNaN(Number(rawRoleStr))) {
+    const r = await pool.query(
+      `SELECT id FROM roles WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      [String(rawRoleStr).trim()]
+    );
+    if (r.rows.length > 0) actualRoleId = r.rows[0].id;
+  }
 
-  if (rawRole) {
-    const strRole = String(rawRole).trim();
-    if (isNaN(Number(strRole))) {
-      const r = await pool.query(`SELECT id FROM roles WHERE LOWER(name) = LOWER($1)`, [strRole]);
-      if (r.rows.length > 0) actualRoleId = r.rows[0].id;
-    }
-    if (!actualRoleId) {
-      const numId = Number(strRole);
-      if (!isNaN(numId)) {
-        const r = await pool.query(`SELECT id FROM roles WHERE id = $1`, [numId]);
+  if (!actualRoleId && (roleId || role_id || rawRoleStr)) {
+    const rawNum = Number(roleId || role_id || rawRoleStr);
+    if (!isNaN(rawNum)) {
+      const frontendRoleMap = {
+        1: "admin",
+        2: "manager",
+        3: "hr",
+        4: "finance",
+        5: "cashier",
+        6: "waiter",
+        7: "chef",
+        8: "bartender",
+      };
+      if (frontendRoleMap[rawNum]) {
+        const r = await pool.query(
+          `SELECT id FROM roles WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+          [frontendRoleMap[rawNum]]
+        );
+        if (r.rows.length > 0) actualRoleId = r.rows[0].id;
+      }
+      if (!actualRoleId) {
+        const r = await pool.query(`SELECT id FROM roles WHERE id = $1`, [rawNum]);
         if (r.rows.length > 0) actualRoleId = r.rows[0].id;
       }
     }
   }
 
+  // 2. Resolve Department ID (prioritize name e.g. 'Kitchen', 'Bar', etc.)
+  let actualDeptId = null;
+  const rawDeptStr = departmentName || department;
+  if (rawDeptStr && isNaN(Number(rawDeptStr))) {
+    const d = await pool.query(
+      `SELECT id FROM departments WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      [String(rawDeptStr).trim()]
+    );
+    if (d.rows.length > 0) actualDeptId = d.rows[0].id;
+  }
+
+  if (!actualDeptId && (departmentId || department_id || rawDeptStr)) {
+    const rawDeptNum = Number(departmentId || department_id || rawDeptStr);
+    if (!isNaN(rawDeptNum)) {
+      const d = await pool.query(`SELECT id FROM departments WHERE id = $1`, [rawDeptNum]);
+      if (d.rows.length > 0) actualDeptId = d.rows[0].id;
+    }
+  }
+
+  // 3. Update the Employee record (with safe ::employee_status cast)
   const result = await pool.query(
     `
     UPDATE employees
-
     SET
       employee_code = COALESCE($1, employee_code),
       first_name = COALESCE($2, first_name),
@@ -525,24 +582,22 @@ const updateEmployee = async (id, employee) => {
       department_id = COALESCE($8, department_id),
       hire_date = COALESCE($9, hire_date),
       salary = COALESCE($10, salary),
-      status = COALESCE($11, status),
+      status = COALESCE($11::employee_status, status),
       updated_at = CURRENT_TIMESTAMP
-
     WHERE id = $12
-
     RETURNING *
     `,
     [
-      employeeCode || null,
-      firstName || null,
-      lastName || null,
+      employeeCode || employee_code || null,
+      firstName || first_name || null,
+      lastName || last_name || null,
       phone || null,
       email || null,
       address || null,
       actualRoleId,
-      departmentId || department_id || null,
-      hireDate || null,
-      salary || null,
+      actualDeptId,
+      hireDate || hire_date || null,
+      salary !== undefined && salary !== null && salary !== "" ? Number(salary) : null,
       status || null,
       id,
     ]
@@ -550,14 +605,47 @@ const updateEmployee = async (id, employee) => {
 
   const updatedEmployee = result.rows[0];
 
-  // Sync role to user account if linked
-  if (updatedEmployee && updatedEmployee.user_id && actualRoleId) {
-    await pool.query(
-      `UPDATE users SET role_id = $1 WHERE id = $2`,
-      [actualRoleId, updatedEmployee.user_id]
-    );
+  // 4. Update linked User account credentials if employee has a user_id
+  if (updatedEmployee && updatedEmployee.user_id) {
+    const userUpdates = [];
+    const userParams = [];
+    let pIdx = 1;
+
+    // Update username if provided
+    if (username && String(username).trim()) {
+      userUpdates.push(`username = $${pIdx++}`);
+      userParams.push(String(username).trim());
+    }
+
+    // Update password (hashed) if a new password was entered (stored in password_hash)
+    if (password && String(password).trim()) {
+      const hashedPassword = await bcrypt.hash(String(password).trim(), 10);
+      userUpdates.push(`password_hash = $${pIdx++}`);
+      userParams.push(hashedPassword);
+    }
+
+    // Keep user role_id in sync
+    if (actualRoleId) {
+      userUpdates.push(`role_id = $${pIdx++}`);
+      userParams.push(actualRoleId);
+    }
+
+    // Keep user email in sync
+    if (email && String(email).trim()) {
+      userUpdates.push(`email = $${pIdx++}`);
+      userParams.push(String(email).trim());
+    }
+
+    if (userUpdates.length > 0) {
+      userParams.push(updatedEmployee.user_id);
+      await pool.query(
+        `UPDATE users SET ${userUpdates.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = $${pIdx}`,
+        userParams
+      );
+    }
   }
 
+  // 5. Fetch and return full updated employee record with role & user info
   const fullEmpRes = await pool.query(
     `
     SELECT
@@ -572,21 +660,18 @@ const updateEmployee = async (id, employee) => {
       e.salary,
       e.status,
       e.user_id,
-
       r.id AS role_id,
       r.name AS role,
-
       d.id AS department_id,
-      d.name AS department
-
+      d.name AS department,
+      u.username
     FROM employees e
-
     LEFT JOIN roles r
       ON e.role_id = r.id
-
     LEFT JOIN departments d
       ON e.department_id = d.id
-
+    LEFT JOIN users u
+      ON e.user_id = u.id
     WHERE e.id = $1
     `,
     [id]

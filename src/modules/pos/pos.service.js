@@ -403,6 +403,8 @@ const createOrder = async (order) => {
             p.parent_product_id,
             p.portion_ratio,
             p.serving_size,
+            p.shots_capacity,
+            p.is_shot_item,
             pc.name AS category_name,
             pc.type AS category_type
 
@@ -546,7 +548,8 @@ const createOrder = async (order) => {
               effectiveDeductionQty = Number((quantity * ratio).toFixed(4));
             }
           } else if (item.shotsDeduction) {
-            const ratio = Number(item.shotsDeduction) * 0.04;
+            const bottleCapacity = Number(product.shots_capacity) > 0 ? Number(product.shots_capacity) : 30;
+            const ratio = Number(item.shotsDeduction) / bottleCapacity;
             effectiveDeductionQty = Number((quantity * ratio).toFixed(4));
           }
 

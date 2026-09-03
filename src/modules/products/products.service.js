@@ -20,6 +20,8 @@ const getAllProducts = async () => {
       p.parent_product_id,
       p.portion_ratio,
       p.serving_size,
+      p.shots_capacity,
+      p.is_shot_item,
       parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
@@ -64,6 +66,8 @@ const getProductById = async (id) => {
       p.parent_product_id,
       p.portion_ratio,
       p.serving_size,
+      p.shots_capacity,
+      p.is_shot_item,
       parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
@@ -110,6 +114,9 @@ const createProduct = async (data) => {
     servingSize,
   } = data;
 
+  const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
+  const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
+
   const result = await pool.query(
     `
     INSERT INTO products (
@@ -128,7 +135,9 @@ const createProduct = async (data) => {
       is_todays_special,
       parent_product_id,
       portion_ratio,
-      serving_size
+      serving_size,
+      shots_capacity,
+      is_shot_item
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -139,7 +148,9 @@ const createProduct = async (data) => {
       COALESCE($13, FALSE),
       $14,
       COALESCE($15, 1.0000),
-      COALESCE($16, 'unit')
+      COALESCE($16, 'unit'),
+      COALESCE($17, 30),
+      COALESCE($18, FALSE)
     )
     RETURNING *
     `,
@@ -160,6 +171,8 @@ const createProduct = async (data) => {
       parentProductId || null,
       portionRatio !== undefined && portionRatio !== null ? Number(portionRatio) : 1.0,
       servingSize || "unit",
+      shotsCapacity !== undefined && shotsCapacity !== null && shotsCapacity !== "" ? parseInt(shotsCapacity, 10) : 30,
+      isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : false,
     ]
   );
 
@@ -188,6 +201,9 @@ const updateProduct = async (id, data) => {
     servingSize,
   } = data;
 
+  const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
+  const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
+
   const result = await pool.query(
     `
     UPDATE products
@@ -208,8 +224,10 @@ const updateProduct = async (id, data) => {
       parent_product_id = CASE WHEN $14::text = 'null' THEN NULL WHEN $14 IS NOT NULL THEN $14::integer ELSE parent_product_id END,
       portion_ratio = COALESCE($15, portion_ratio),
       serving_size = COALESCE($16, serving_size),
+      shots_capacity = COALESCE($17, shots_capacity),
+      is_shot_item = COALESCE($18, is_shot_item),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $17
+    WHERE id = $19
     RETURNING *
     `,
     [
@@ -229,6 +247,8 @@ const updateProduct = async (id, data) => {
       parentProductId !== undefined ? parentProductId : null,
       portionRatio !== undefined ? Number(portionRatio) : null,
       servingSize !== undefined ? servingSize : null,
+      shotsCapacity !== undefined && shotsCapacity !== null && shotsCapacity !== "" ? parseInt(shotsCapacity, 10) : null,
+      isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : null,
       id,
     ]
   );
@@ -325,6 +345,8 @@ const getMenu = async (menuType) => {
       p.parent_product_id,
       p.portion_ratio,
       p.serving_size,
+      p.shots_capacity,
+      p.is_shot_item,
       p.created_at,
       p.updated_at,
 

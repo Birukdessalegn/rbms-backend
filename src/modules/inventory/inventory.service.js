@@ -19,6 +19,8 @@ const getAllInventory = async () => {
       p.name AS product_name,
       p.price,
       p.cost_price,
+      p.shots_capacity,
+      p.is_shot_item,
       p.is_available,
       p.is_active,
 
@@ -486,6 +488,8 @@ const getDepartmentInventory = async (department) => {
       p.product_code,
       p.price,
       p.cost_price,
+      p.shots_capacity,
+      p.is_shot_item,
       pc.name AS category_name,
       pc.type AS category_type,
 
@@ -536,6 +540,8 @@ const getMultiLocationInventory = async () => {
       p.price,
       p.cost_price,
       p.unit,
+      p.shots_capacity,
+      p.is_shot_item,
       pc.name AS category_name,
       pc.type AS category_type,
 

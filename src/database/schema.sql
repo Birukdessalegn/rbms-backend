@@ -376,6 +376,12 @@ CREATE TABLE IF NOT EXISTS products (
 
     is_todays_special BOOLEAN DEFAULT FALSE,
 
+    parent_product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+
+    portion_ratio NUMERIC(10,4) DEFAULT 1.0000,
+
+    serving_size VARCHAR(50) DEFAULT 'unit',
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -627,6 +633,8 @@ CREATE TABLE IF NOT EXISTS orders (
 
     payment_status payment_status DEFAULT 'pending',
 
+    vip_customer_id INTEGER,
+
     notes TEXT,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -771,7 +779,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
     image_url TEXT,
 
-    receipt_image TEXT
+    receipt_image TEXT,
+
+    vip_customer_id INTEGER
 );
 
 
@@ -1106,6 +1116,83 @@ CREATE TABLE IF NOT EXISTS customer_repayments (
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- ============================================================
+-- DEPARTMENT INVENTORY (OUTLET SUB-STORES: BAR & KITCHEN)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS department_inventory (
+    id SERIAL PRIMARY KEY,
+    department VARCHAR(50) NOT NULL,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+    minimum_stock NUMERIC(12,3) NOT NULL DEFAULT 5,
+    maximum_stock NUMERIC(12,3),
+    unit VARCHAR(30) DEFAULT 'pcs',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(department, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dept_inv_dept ON department_inventory(department);
+CREATE INDEX IF NOT EXISTS idx_dept_inv_product ON department_inventory(product_id);
+
+
+-- ============================================================
+-- STOCK TRANSFERS (INTERNAL REQUISITIONS & TRANSFERS)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stock_transfers (
+    id SERIAL PRIMARY KEY,
+    transfer_number VARCHAR(50) UNIQUE NOT NULL,
+    from_location VARCHAR(50) NOT NULL DEFAULT 'main',
+    to_location VARCHAR(50) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'completed',
+    requested_by UUID REFERENCES users(id),
+    dispatched_by UUID REFERENCES users(id),
+    received_by UUID REFERENCES users(id),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_transfers_status ON stock_transfers(status);
+CREATE INDEX IF NOT EXISTS idx_transfers_locations ON stock_transfers(from_location, to_location);
+
+
+-- ============================================================
+-- STOCK TRANSFER ITEMS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stock_transfer_items (
+    id SERIAL PRIMARY KEY,
+    transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    quantity NUMERIC(12,3) NOT NULL,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_transfer_items_transfer ON stock_transfer_items(transfer_id);
+
+
+-- ============================================================
+-- DEPARTMENT INVENTORY TRANSACTIONS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS department_inventory_transactions (
+    id SERIAL PRIMARY KEY,
+    department VARCHAR(50) NOT NULL,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    transaction_type VARCHAR(50) NOT NULL,
+    quantity NUMERIC(12,3) NOT NULL,
+    reference_type VARCHAR(50),
+    reference_id INTEGER,
+    notes TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dept_tx_dept_prod ON department_inventory_transactions(department, product_id);
 
 
 -- ============================================================

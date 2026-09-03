@@ -26,7 +26,8 @@ const getInventory = async (req, res) => {
 // GET /api/inventory/low-stock
 const getLowStock = async (req, res) => {
   try {
-    const inventory = await inventoryService.getLowStock();
+    const { location } = req.query;
+    const inventory = await inventoryService.getLowStock(location);
 
     res.json({
       success: true,
@@ -252,6 +253,73 @@ const getTransactions = async (req, res) => {
 };
 
 
+// GET /api/inventory/multi-location
+const getMultiLocationInventory = async (req, res) => {
+  try {
+    const inventory = await inventoryService.getMultiLocationInventory();
+
+    res.json({
+      success: true,
+      count: inventory.length,
+      inventory,
+    });
+  } catch (error) {
+    console.error("Get multi-location inventory error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch multi-location inventory matrix",
+    });
+  }
+};
+
+
+// GET /api/inventory/departments/:department
+const getDepartmentInventory = async (req, res) => {
+  try {
+    const { department } = req.params;
+    const inventory = await inventoryService.getDepartmentInventory(department);
+
+    res.json({
+      success: true,
+      department,
+      count: inventory.length,
+      inventory,
+    });
+  } catch (error) {
+    console.error("Get department inventory error:", error);
+    res.status(500).json({
+      success: false,
+      message: `Failed to fetch ${req.params.department} inventory`,
+    });
+  }
+};
+
+
+// PUT /api/inventory/departments/:department/product/:productId
+const updateDepartmentStockSettings = async (req, res) => {
+  try {
+    const { department, productId } = req.params;
+    const updated = await inventoryService.updateDepartmentStockSettings(
+      department,
+      productId,
+      req.body
+    );
+
+    res.json({
+      success: true,
+      message: `${department.toUpperCase()} inventory settings updated successfully`,
+      inventory: updated,
+    });
+  } catch (error) {
+    console.error("Update department stock settings error:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to update department inventory settings",
+    });
+  }
+};
+
+
 module.exports = {
   getInventory,
   getInventoryByProduct,
@@ -261,4 +329,7 @@ module.exports = {
   stockOut,
   getLowStock,
   getTransactions,
+  getMultiLocationInventory,
+  getDepartmentInventory,
+  updateDepartmentStockSettings,
 };

@@ -142,10 +142,34 @@ const getTopProducts = async (req, res) => {
 };
 
 
+// ============================================================
+// TODAY'S DEPARTMENT SALES (ITEMIZED BAR VS KITCHEN)
+// ============================================================
+
+const getTodayDepartmentSales = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const data = await dashboardService.getTodayDepartmentSales(date);
+
+    res.json({
+      success: true,
+      ...data,
+    });
+  } catch (error) {
+    console.error("Today department sales error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch today's department sales",
+    });
+  }
+};
+
+
 module.exports = {
   getDashboard,
   getTodaySales,
   getRecentOrders,
   getSalesChart,
   getTopProducts,
+  getTodayDepartmentSales,
 };

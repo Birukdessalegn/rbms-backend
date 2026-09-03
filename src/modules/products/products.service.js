@@ -17,6 +17,10 @@ const getAllProducts = async () => {
       p.is_active,
       p.menu_type,
       p.is_todays_special,
+      p.parent_product_id,
+      p.portion_ratio,
+      p.serving_size,
+      parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
 
@@ -28,6 +32,9 @@ const getAllProducts = async () => {
 
     LEFT JOIN product_categories pc
       ON p.category_id = pc.id
+
+    LEFT JOIN products parent_p
+      ON p.parent_product_id = parent_p.id
 
     ORDER BY p.created_at DESC
   `);
@@ -54,6 +61,10 @@ const getProductById = async (id) => {
       p.is_active,
       p.menu_type,
       p.is_todays_special,
+      p.parent_product_id,
+      p.portion_ratio,
+      p.serving_size,
+      parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
 
@@ -65,6 +76,9 @@ const getProductById = async (id) => {
 
     LEFT JOIN product_categories pc
       ON p.category_id = pc.id
+
+    LEFT JOIN products parent_p
+      ON p.parent_product_id = parent_p.id
 
     WHERE p.id = $1
     `,
@@ -91,6 +105,9 @@ const createProduct = async (data) => {
     isActive,
     menuType,
     isTodaysSpecial,
+    parentProductId,
+    portionRatio,
+    servingSize,
   } = data;
 
   const result = await pool.query(
@@ -108,7 +125,10 @@ const createProduct = async (data) => {
       is_available,
       is_active,
       menu_type,
-      is_todays_special
+      is_todays_special,
+      parent_product_id,
+      portion_ratio,
+      serving_size
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -116,7 +136,10 @@ const createProduct = async (data) => {
       COALESCE($10, TRUE),
       COALESCE($11, TRUE),
       COALESCE($12, 'both'),
-      COALESCE($13, FALSE)
+      COALESCE($13, FALSE),
+      $14,
+      COALESCE($15, 1.0000),
+      COALESCE($16, 'unit')
     )
     RETURNING *
     `,
@@ -134,6 +157,9 @@ const createProduct = async (data) => {
       isActive,
       menuType || "both",
       isTodaysSpecial || false,
+      parentProductId || null,
+      portionRatio !== undefined && portionRatio !== null ? Number(portionRatio) : 1.0,
+      servingSize || "unit",
     ]
   );
 
@@ -157,6 +183,9 @@ const updateProduct = async (id, data) => {
     isActive,
     menuType,
     isTodaysSpecial,
+    parentProductId,
+    portionRatio,
+    servingSize,
   } = data;
 
   const result = await pool.query(
@@ -176,8 +205,11 @@ const updateProduct = async (id, data) => {
       is_active = COALESCE($11, is_active),
       menu_type = COALESCE($12, menu_type),
       is_todays_special = COALESCE($13, is_todays_special),
+      parent_product_id = CASE WHEN $14::text = 'null' THEN NULL WHEN $14 IS NOT NULL THEN $14::integer ELSE parent_product_id END,
+      portion_ratio = COALESCE($15, portion_ratio),
+      serving_size = COALESCE($16, serving_size),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $14
+    WHERE id = $17
     RETURNING *
     `,
     [
@@ -194,6 +226,9 @@ const updateProduct = async (id, data) => {
       isActive,
       menuType,
       isTodaysSpecial,
+      parentProductId !== undefined ? parentProductId : null,
+      portionRatio !== undefined ? Number(portionRatio) : null,
+      servingSize !== undefined ? servingSize : null,
       id,
     ]
   );
@@ -287,6 +322,9 @@ const getMenu = async (menuType) => {
       p.is_active,
       p.menu_type,
       p.is_todays_special,
+      p.parent_product_id,
+      p.portion_ratio,
+      p.serving_size,
       p.created_at,
       p.updated_at,
 

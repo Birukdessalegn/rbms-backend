@@ -112,12 +112,46 @@ const getAllPurchases = async () => {
       po.created_at,
       po.updated_at,
 
-      s.name AS supplier_name
+      s.name AS supplier_name,
+
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', poi.id,
+            'productId', poi.product_id,
+            'product_id', poi.product_id,
+            'name', p.name,
+            'product_name', p.name,
+            'quantity', poi.quantity,
+            'unit_price', poi.unit_price,
+            'total', poi.total,
+            'unit', p.unit,
+            'received_quantity', poi.received_quantity,
+            'category_name', pc.name,
+            'category_type', pc.type
+          )
+        ) FILTER (WHERE poi.id IS NOT NULL),
+        '[]'
+      ) AS items,
+
+      COALESCE(SUM(poi.quantity), 0) AS total_items,
+      COALESCE(COUNT(poi.id), 0) AS items_count
 
     FROM purchase_orders po
 
     LEFT JOIN suppliers s
       ON po.supplier_id = s.id
+
+    LEFT JOIN purchase_order_items poi
+      ON po.id = poi.purchase_order_id
+
+    LEFT JOIN products p
+      ON poi.product_id = p.id
+
+    LEFT JOIN product_categories pc
+      ON p.category_id = pc.id
+
+    GROUP BY po.id, s.name
 
     ORDER BY po.created_at DESC
   `);

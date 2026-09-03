@@ -40,4 +40,11 @@ router.get(
 );
 
 
+// Today's department sales (itemized Bar vs Kitchen)
+router.get(
+    "/today-department-sales",
+    dashboardController.getTodayDepartmentSales
+);
+
+
 module.exports = router;

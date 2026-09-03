@@ -1,4 +1,5 @@
 const pool = require("../../config/database");
+const notificationsService = require("../notifications/notifications.service");
 
 // ============================================================
 // GET ALL POS ORDERS
@@ -123,9 +124,9 @@ const getOrderById = async (id) => {
     LEFT JOIN employees e
       ON o.waiter_id = e.id
 
-    WHERE o.id = $1
+    WHERE o.id::text = $1 OR o.order_number = $1
     `,
-    [id]
+    [String(id).trim()]
   );
 
   if (orderResult.rows.length === 0) {
@@ -163,7 +164,7 @@ const getOrderById = async (id) => {
 
     ORDER BY oi.id ASC
     `,
-    [id]
+    [order.id]
   );
 
   order.items = itemsResult.rows;
@@ -190,7 +191,7 @@ const getOrderById = async (id) => {
     WHERE order_id = $1
     ORDER BY paid_at DESC
     `,
-    [id]
+    [order.id]
   );
 
   order.payments = paymentsResult.rows;
@@ -207,6 +208,8 @@ const createOrder = async (order) => {
   const {
     orderNumber,
     customerId,
+    vipCustomerId,
+    vip_customer_id,
     tableId,
     waiterId,
     orderType,
@@ -217,6 +220,8 @@ const createOrder = async (order) => {
     total,
     notes,
   } = order;
+
+  const targetVipId = vipCustomerId || vip_customer_id || null;
 
   const client = await pool.connect();
 
@@ -314,6 +319,7 @@ const createOrder = async (order) => {
       INSERT INTO orders (
         order_number,
         customer_id,
+        vip_customer_id,
         table_id,
         waiter_id,
         order_type,
@@ -335,15 +341,17 @@ const createOrder = async (order) => {
         $7,
         $8,
         $9,
+        $10,
         'pending',
         'pending',
-        $10
+        $11
       )
       RETURNING *
       `,
       [
         orderNumber || null,
         customerId || null,
+        targetVipId,
         validTableId,
         employeeId,
         orderType || "dine_in",
@@ -367,6 +375,7 @@ const createOrder = async (order) => {
 
     const kitchenItems = [];
     const barItems = [];
+    const deptLowStockAlerts = [];
 
     let calculatedSubtotal = 0;
 
@@ -378,13 +387,22 @@ const createOrder = async (order) => {
         // GET PRODUCT FROM DATABASE
         // ========================================================
 
+        const rawId = item.productId || item.product_id;
+        const cleanProductId = typeof rawId === "string" && rawId.includes("_")
+          ? parseInt(rawId.split("_")[0], 10)
+          : parseInt(rawId, 10);
+
         const productResult = await client.query(
           `
           SELECT
             p.id,
             p.name,
             p.price,
+            p.unit,
             p.category_id,
+            p.parent_product_id,
+            p.portion_ratio,
+            p.serving_size,
             pc.name AS category_name,
             pc.type AS category_type
 
@@ -395,13 +413,13 @@ const createOrder = async (order) => {
 
           WHERE p.id = $1
           `,
-          [item.productId || item.product_id]
+          [cleanProductId]
         );
 
 
         if (productResult.rows.length === 0) {
           throw new Error(
-            `Product with ID ${item.productId || item.product_id} not found`
+            `Product with ID ${cleanProductId || rawId} not found`
           );
         }
 
@@ -410,10 +428,10 @@ const createOrder = async (order) => {
 
 
         // ========================================================
-        // USE REAL PRODUCT PRICE
+        // USE REAL PRODUCT PRICE (OR PORTION PRICE IF SPECIFIED)
         // ========================================================
 
-        const unitPrice = Number(product.price || 0);
+        const unitPrice = Number(item.price || item.unitPrice || item.unit_price || product.price || 0);
 
         const quantity = Number(
           item.quantity || 0
@@ -495,6 +513,100 @@ const createOrder = async (order) => {
           console.log(
             `Product "${product.name}" has category "${categoryType}" and will not be sent to kitchen or bar.`
           );
+        }
+
+        // ========================================================
+        // AUTOMATIC STOCK DEDUCTION FROM BAR / KITCHEN SUB-STORE
+        // WITH PARENT-PRODUCT PORTION CONVERSION (SHOTS / HALF BOTTLE)
+        // ========================================================
+        let targetDepartment = null;
+        if (categoryType === "food") {
+          targetDepartment = "kitchen";
+        } else if (categoryType === "beverage" || categoryType === "bar") {
+          targetDepartment = "bar";
+        }
+
+        if (targetDepartment) {
+          let stockProductId = product.id;
+          let stockProductName = product.name;
+          let stockUnit = product.unit || "pcs";
+          let effectiveDeductionQty = Number(quantity);
+
+          // If item is a portion (shot, half bottle, etc.), link to parent bottle
+          if (product.parent_product_id) {
+            const parentCheck = await client.query(
+              "SELECT id, name, unit FROM products WHERE id = $1",
+              [product.parent_product_id]
+            );
+            if (parentCheck.rows.length > 0) {
+              stockProductId = parentCheck.rows[0].id;
+              stockProductName = parentCheck.rows[0].name;
+              stockUnit = parentCheck.rows[0].unit || "bottle";
+              const ratio = Number(product.portion_ratio || 1.0);
+              effectiveDeductionQty = Number((quantity * ratio).toFixed(4));
+            }
+          } else if (item.shotsDeduction) {
+            const ratio = Number(item.shotsDeduction) * 0.04;
+            effectiveDeductionQty = Number((quantity * ratio).toFixed(4));
+          }
+
+          const deptStockResult = await client.query(
+            `
+            INSERT INTO department_inventory (
+              department,
+              product_id,
+              quantity,
+              minimum_stock,
+              unit,
+              updated_at
+            )
+            VALUES ($1, $2, (0 - $3::numeric), 5, $4, CURRENT_TIMESTAMP)
+            ON CONFLICT (department, product_id)
+            DO UPDATE SET
+              quantity = department_inventory.quantity - $3::numeric,
+              updated_at = CURRENT_TIMESTAMP
+            RETURNING quantity, minimum_stock
+            `,
+            [targetDepartment, stockProductId, effectiveDeductionQty, stockUnit]
+          );
+
+          await client.query(
+            `
+            INSERT INTO department_inventory_transactions (
+              department,
+              product_id,
+              transaction_type,
+              quantity,
+              reference_type,
+              reference_id,
+              notes,
+              created_by
+            )
+            VALUES ($1, $2, 'pos_sale', $3, 'order', $4, $5, $6)
+            `,
+            [
+              targetDepartment,
+              stockProductId,
+              effectiveDeductionQty,
+              createdOrder.id,
+              product.parent_product_id
+                ? `POS Portion Sale - Order #${createdOrder.order_number || createdOrder.id}: ${quantity}x ${product.name} (deducted ${effectiveDeductionQty} ${stockUnit} of ${stockProductName})`
+                : `POS Sale - Order #${createdOrder.order_number || createdOrder.id}`,
+              order.user?.id || employeeId || null,
+            ]
+          );
+
+          const remainingQty = Number(deptStockResult.rows[0].quantity);
+          const minQty = Number(deptStockResult.rows[0].minimum_stock || 0);
+
+          if (remainingQty <= minQty) {
+            deptLowStockAlerts.push({
+              productName: stockProductName,
+              department: targetDepartment,
+              remaining: remainingQty,
+              min: minQty,
+            });
+          }
         }
       }
     }
@@ -687,6 +799,19 @@ const createOrder = async (order) => {
 
     await client.query("COMMIT");
 
+    // ============================================================
+    // SEND LOW STOCK NOTIFICATIONS FOR BAR / KITCHEN
+    // ============================================================
+    for (const alert of deptLowStockAlerts) {
+      notificationsService.createNotification({
+        targetRoles: ["admin", "manager"],
+        title: `${alert.department.toUpperCase()} Low Stock Alert`,
+        message: `"${alert.productName}" in ${alert.department.toUpperCase()} is running low (${alert.remaining} remaining, minimum: ${alert.min}). F&B restock required!`,
+        type: "warning",
+        referenceType: "department_low_stock",
+      }).catch((err) => console.error("Error sending department low stock notification:", err.message));
+    }
+
     return createdOrder;
 
   } catch (error) {
@@ -716,10 +841,10 @@ const updateOrderStatus = async (id, status) => {
     SET
       status = $1,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $2
+    WHERE id::text = $2 OR order_number = $2
     RETURNING *
     `,
-    [status, id]
+    [status, String(id).trim()]
   );
 
   return result.rows[0] || null;
@@ -732,7 +857,8 @@ const createPayment = async (orderId, data) => {
   try {
     await client.query("BEGIN");
 
-    const { amount, paymentMethod, reference, receivedBy, status } = data;
+    const { amount, paymentMethod, reference, receivedBy, status, vipCustomerId, vip_customer_id, customerId } = data;
+    const targetVipId = vipCustomerId || vip_customer_id || customerId || null;
     const finalImageUrl =
       data.receiptImage ||
       data.imageUrl ||
@@ -750,11 +876,9 @@ const createPayment = async (orderId, data) => {
       validReceivedBy = receivedBy;
     }
 
-    // Validate Order ID
-    const numericOrderId = Number(orderId);
-
-    if (!Number.isInteger(numericOrderId)) {
-      throw new Error("Invalid order ID");
+    // Validate Order ID or Order Number
+    if (!orderId || String(orderId).trim() === "") {
+      throw new Error("Order ID or order number is required");
     }
 
     // Validate Payment Amount
@@ -768,15 +892,15 @@ const createPayment = async (orderId, data) => {
       throw new Error("Payment method is required");
     }
 
-    // 1. Fetch Order with FOR UPDATE lock
+    // 1. Fetch Order with FOR UPDATE lock (supports numeric id or order_number)
     const orderResult = await client.query(
       `
       SELECT id, total, payment_status, status, table_id
       FROM orders
-      WHERE id = $1
+      WHERE id::text = $1 OR order_number = $1
       FOR UPDATE
       `,
-      [numericOrderId]
+      [String(orderId).trim()]
     );
 
     if (orderResult.rows.length === 0) {
@@ -784,6 +908,7 @@ const createPayment = async (orderId, data) => {
     }
 
     const order = orderResult.rows[0];
+    const realNumericDbId = order.id;
     let orderTotal = Number(order.total || 0);
 
     // 2. Calculate Previously Paid Amount
@@ -793,7 +918,7 @@ const createPayment = async (orderId, data) => {
       FROM payments
       WHERE order_id = $1 AND status = 'paid'
       `,
-      [numericOrderId]
+      [realNumericDbId]
     );
 
     const alreadyPaid = Number(paidResult.rows[0].paid_amount || 0);
@@ -806,7 +931,7 @@ const createPayment = async (orderId, data) => {
         SET total = $1, updated_at = CURRENT_TIMESTAMP
         WHERE id = $2
         `,
-        [alreadyPaid + paymentAmount, numericOrderId]
+        [alreadyPaid + paymentAmount, realNumericDbId]
       );
       orderTotal = alreadyPaid + paymentAmount;
     }
@@ -832,21 +957,30 @@ const createPayment = async (orderId, data) => {
         received_by,
         image_url,
         receipt_image,
+        vip_customer_id,
         paid_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, CURRENT_TIMESTAMP)
       RETURNING *, paid_at AS created_at
       `,
       [
-        numericOrderId,
+        realNumericDbId,
         paymentAmount,
         paymentMethod,
         reference || null,
         paymentStatusParam,
         validReceivedBy,
         finalImageUrl,
+        targetVipId,
       ]
     );
+
+    if (targetVipId) {
+      await client.query(
+        `UPDATE orders SET vip_customer_id = $1 WHERE id = $2 AND vip_customer_id IS NULL`,
+        [targetVipId, realNumericDbId]
+      );
+    }
 
     const createdPayment = paymentResult.rows[0];
 
@@ -857,7 +991,7 @@ const createPayment = async (orderId, data) => {
       FROM payments
       WHERE order_id = $1 AND status = 'paid'
       `,
-      [numericOrderId]
+      [realNumericDbId]
     );
 
     const totalPaid = Number(newPaidResult.rows[0].paid_amount || 0);
@@ -884,7 +1018,7 @@ const createPayment = async (orderId, data) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
       `,
-      [dbPaymentStatus, dbOrderStatus, numericOrderId]
+      [dbPaymentStatus, dbOrderStatus, realNumericDbId]
     );
 
     // Release table if order is fully settled

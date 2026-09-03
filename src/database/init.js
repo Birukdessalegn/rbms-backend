@@ -10,11 +10,63 @@ const initializeDatabase = async () => {
 
     await pool.query(schema);
 
-    // Auto-migrate existing payments table if missing image_url or receipt_image column
+    // Auto-migrate existing payments and orders tables if missing columns
     await pool.query(`
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS image_url TEXT;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_image TEXT;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS vip_customer_id INTEGER;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS vip_customer_id INTEGER;
       ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS current_waiter_id INTEGER;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id INTEGER REFERENCES products(id) ON DELETE SET NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS portion_ratio NUMERIC(10,4) DEFAULT 1.0000;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS serving_size VARCHAR(50) DEFAULT 'unit';
+
+      CREATE TABLE IF NOT EXISTS department_inventory (
+        id SERIAL PRIMARY KEY,
+        department VARCHAR(50) NOT NULL,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        minimum_stock NUMERIC(12,3) NOT NULL DEFAULT 5,
+        maximum_stock NUMERIC(12,3),
+        unit VARCHAR(30) DEFAULT 'pcs',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(department, product_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS stock_transfers (
+        id SERIAL PRIMARY KEY,
+        transfer_number VARCHAR(50) UNIQUE NOT NULL,
+        from_location VARCHAR(50) NOT NULL DEFAULT 'main',
+        to_location VARCHAR(50) NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'completed',
+        requested_by UUID REFERENCES users(id),
+        dispatched_by UUID REFERENCES users(id),
+        received_by UUID REFERENCES users(id),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS stock_transfer_items (
+        id SERIAL PRIMARY KEY,
+        transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        quantity NUMERIC(12,3) NOT NULL,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS department_inventory_transactions (
+        id SERIAL PRIMARY KEY,
+        department VARCHAR(50) NOT NULL,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        transaction_type VARCHAR(50) NOT NULL,
+        quantity NUMERIC(12,3) NOT NULL,
+        reference_type VARCHAR(50),
+        reference_id INTEGER,
+        notes TEXT,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // Auto-link missing user_id on employees table

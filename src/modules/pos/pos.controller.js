@@ -192,6 +192,7 @@ const createPayment = async (req, res) => {
 
     const result = await posService.createPayment(orderId, {
       ...req.body,
+      vipCustomerId: targetVipId,
       receivedBy: req.user?.id || req.body.receivedBy,
     });
 

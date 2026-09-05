@@ -61,21 +61,24 @@ const getCashierShiftById = async (req, res) => {
 const verifyCashierShift = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const { status, notes, verification_notes, verificationNotes } = req.body;
     const verifiedBy = req.user?.id || null;
+    const verifiedByName = req.user?.username || null;
+    const auditNotes = verification_notes || verificationNotes || notes || null;
 
     if (!status) {
       return res.status(400).json({
         success: false,
-        message: "Status is required (verified or discrepancy)",
+        message: "Status is required ('verified' or 'discrepancy')",
       });
     }
 
     const updatedShift = await financeService.verifyCashierShift(
       id,
       status,
-      notes,
-      verifiedBy
+      auditNotes,
+      verifiedBy,
+      verifiedByName
     );
 
     if (!updatedShift) {

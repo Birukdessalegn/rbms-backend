@@ -3,7 +3,33 @@ const express = require("express");
 const router = express.Router();
 
 const posController = require("./pos.controller");
+const shiftsController = require("./shifts.controller");
 const authenticate = require("../../middleware/auth.middleware");
+
+// ============================================================
+// CASHIER SHIFTS & DAILY AUDIT
+// ============================================================
+
+// Get current shift (with live computed sales totals)
+router.get(
+  "/shifts/current",
+  authenticate,
+  shiftsController.getCurrentShift
+);
+
+// Start a new shift
+router.post(
+  "/shifts/start",
+  authenticate,
+  shiftsController.startShift
+);
+
+// Close current shift and submit physical drawer count
+router.post(
+  "/shifts/close",
+  authenticate,
+  shiftsController.closeShift
+);
 
 // ============================================================
 // ORDERS

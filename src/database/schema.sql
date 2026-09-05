@@ -1055,11 +1055,15 @@ CREATE TABLE IF NOT EXISTS cashier_shifts (
     cashier_id UUID NOT NULL REFERENCES users(id)
         ON DELETE CASCADE,
 
+    cashier_name VARCHAR(150),
+
     terminal_id INTEGER DEFAULT 1,
 
     start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     end_time TIMESTAMP,
+
+    opening_cash NUMERIC(12,2) DEFAULT 0.00,
 
     expected_cash NUMERIC(12,2) DEFAULT 0.00,
 
@@ -1071,15 +1075,27 @@ CREATE TABLE IF NOT EXISTS cashier_shifts (
 
     total_mobile_sales NUMERIC(12,2) DEFAULT 0.00,
 
-    status VARCHAR(30) DEFAULT 'pending',
+    total_credit_sales NUMERIC(12,2) DEFAULT 0.00,
 
-    verification_notes TEXT,
+    total_sales NUMERIC(12,2) DEFAULT 0.00,
+
+    total_orders_count INTEGER DEFAULT 0,
+
+    status VARCHAR(30) DEFAULT 'open',
+
+    cashier_notes TEXT,
 
     verified_by UUID REFERENCES users(id),
 
+    verified_by_name VARCHAR(150),
+
     verified_at TIMESTAMP,
 
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    verification_notes TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_cashier_shifts_status
@@ -1087,6 +1103,9 @@ ON cashier_shifts(status);
 
 CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier
 ON cashier_shifts(cashier_id);
+
+CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier_status
+ON cashier_shifts(cashier_id, status);
 
 
 -- ============================================================

@@ -23,6 +23,16 @@ const initializeDatabase = async () => {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS shots_capacity INTEGER DEFAULT 30;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_shot_item BOOLEAN DEFAULT FALSE;
 
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(150);
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_credit_sales NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_sales NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_orders_count INTEGER DEFAULT 0;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS cashier_notes TEXT;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS verified_by_name VARCHAR(150);
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier_status ON cashier_shifts(cashier_id, status);
+
       CREATE TABLE IF NOT EXISTS department_inventory (
         id SERIAL PRIMARY KEY,
         department VARCHAR(50) NOT NULL,

@@ -341,10 +341,233 @@ const deleteKitchenOrder = async (id) => {
     `,
     [id]
   );
-
   return result.rows[0];
 };
 
+// ============================================================
+// GET KITCHEN STOCK AUDITS (AUDIT HISTORY)
+// ============================================================
+
+const getKitchenAudits = async ({ limit = 50, productId, department } = {}) => {
+  let query = `
+    SELECT
+      ksa.id,
+      ksa.product_id,
+      ksa.department,
+      ksa.action,
+      ksa.physical_count_found,
+      ksa.verified_by,
+      ksa.verifier_name,
+      ksa.notes,
+      ksa.created_at,
+
+      p.name AS product_name,
+      p.product_code,
+      p.unit,
+      p.image_url,
+      pc.name AS category_name,
+
+      COALESCE(di.quantity, 0) AS current_kitchen_stock
+
+    FROM kitchen_stock_audits ksa
+    JOIN products p ON ksa.product_id = p.id
+    LEFT JOIN product_categories pc ON p.category_id = pc.id
+    LEFT JOIN department_inventory di ON di.product_id = p.id AND di.department = ksa.department
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (productId) {
+    params.push(productId);
+    query += ` AND ksa.product_id = $${params.length}`;
+  }
+
+  if (department) {
+    params.push(department.toLowerCase());
+    query += ` AND ksa.department = $${params.length}`;
+  }
+
+  query += ` ORDER BY ksa.created_at DESC`;
+
+  if (limit) {
+    params.push(limit);
+    query += ` LIMIT $${params.length}`;
+  }
+
+  const result = await pool.query(query, params);
+  return result.rows;
+};
+
+// ============================================================
+// VERIFY KITCHEN STOCK / APPROVE OUT-OF-STOCK
+// ============================================================
+
+const verifyKitchenStock = async ({
+  productId,
+  department = "kitchen",
+  action, // 'approved_depleted' | 'rejected_stock_found' | 'verified_in_stock'
+  physicalCountFound = 0,
+  notes,
+  userId,
+  verifierName,
+}) => {
+  if (!productId) {
+    throw new Error("Product ID is required for stock verification.");
+  }
+
+  if (!action || !["approved_depleted", "rejected_stock_found", "verified_in_stock"].includes(action)) {
+    throw new Error("Invalid verification action. Must be 'approved_depleted', 'rejected_stock_found', or 'verified_in_stock'.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1. Get product info
+    const prodRes = await client.query(
+      `SELECT id, name, unit FROM products WHERE id = $1`,
+      [productId]
+    );
+
+    if (prodRes.rows.length === 0) {
+      throw new Error(`Product #${productId} not found.`);
+    }
+    const product = prodRes.rows[0];
+
+    // 2. Resolve verifier name if not provided
+    let finalVerifierName = verifierName;
+    if (!finalVerifierName && userId) {
+      const userRes = await client.query(
+        `
+        SELECT u.username, e.first_name, e.last_name
+        FROM users u
+        LEFT JOIN employees e ON e.user_id = u.id
+        WHERE u.id = $1
+        `,
+        [userId]
+      );
+      if (userRes.rows.length > 0) {
+        const u = userRes.rows[0];
+        finalVerifierName = (u.first_name && u.last_name) ? `${u.first_name} ${u.last_name}` : u.username;
+      }
+    }
+
+    const countFound = Number(physicalCountFound || 0);
+
+    // 3. Handle stock updates based on action
+    if (action === "rejected_stock_found" || action === "verified_in_stock") {
+      // The controller found physical stock! Restore it in kitchen sub-store
+      await client.query(
+        `
+        INSERT INTO department_inventory (department, product_id, quantity, unit, updated_at)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        ON CONFLICT (department, product_id)
+        DO UPDATE SET quantity = $3, updated_at = CURRENT_TIMESTAMP
+        `,
+        [department, productId, countFound, product.unit || "pcs"]
+      );
+
+      // Record transaction
+      await client.query(
+        `
+        INSERT INTO department_inventory_transactions (
+          department,
+          product_id,
+          transaction_type,
+          quantity,
+          reference_type,
+          notes,
+          created_by
+        )
+        VALUES ($1, $2, 'adjustment_in', $3, 'physical_audit', $4, $5)
+        `,
+        [
+          department,
+          productId,
+          countFound,
+          `F&B Controller found physical stock during kitchen inspection (${notes || "Stock verified in kitchen"})`,
+          userId || null,
+        ]
+      );
+
+      // Ensure product is marked available
+      if (countFound > 0) {
+        await client.query(
+          `UPDATE products SET is_available = TRUE WHERE id = $1`,
+          [productId]
+        );
+      }
+    } else if (action === "approved_depleted") {
+      // Confirmed genuinely depleted / finished
+      await client.query(
+        `
+        INSERT INTO department_inventory (department, product_id, quantity, unit, updated_at)
+        VALUES ($1, $2, 0, $3, CURRENT_TIMESTAMP)
+        ON CONFLICT (department, product_id)
+        DO UPDATE SET quantity = 0, updated_at = CURRENT_TIMESTAMP
+        `,
+        [department, productId, product.unit || "pcs"]
+      );
+
+      await client.query(
+        `
+        INSERT INTO department_inventory_transactions (
+          department,
+          product_id,
+          transaction_type,
+          quantity,
+          reference_type,
+          notes,
+          created_by
+        )
+        VALUES ($1, $2, 'depleted_verified', 0, 'physical_audit', $3, $4)
+        `,
+        [
+          department,
+          productId,
+          `F&B Controller physically verified item is completely depleted in kitchen (${notes || "Confirmed finished"})`,
+          userId || null,
+        ]
+      );
+    }
+
+    // 4. Record audit entry
+    const auditRes = await client.query(
+      `
+      INSERT INTO kitchen_stock_audits (
+        product_id,
+        department,
+        action,
+        physical_count_found,
+        verified_by,
+        verifier_name,
+        notes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+      `,
+      [
+        productId,
+        department,
+        action,
+        countFound,
+        userId || null,
+        finalVerifierName || "F&B Controller",
+        notes || null,
+      ]
+    );
+
+    await client.query("COMMIT");
+    return auditRes.rows[0];
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
 
 module.exports = {
   getAllKitchenOrders,
@@ -352,4 +575,6 @@ module.exports = {
   createKitchenOrder,
   updateKitchenOrderStatus,
   deleteKitchenOrder,
+  getKitchenAudits,
+  verifyKitchenStock,
 };

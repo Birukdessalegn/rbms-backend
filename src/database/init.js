@@ -16,7 +16,34 @@ const initializeDatabase = async () => {
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_image TEXT;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS vip_customer_id INTEGER;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS vip_customer_id INTEGER;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_bar_order BOOLEAN DEFAULT FALSE;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS bartender_id INTEGER REFERENCES employees(id);
       ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS current_waiter_id INTEGER;
+      ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS is_bar_seat BOOLEAN DEFAULT FALSE;
+      ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'dining';
+      ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS section VARCHAR(50) DEFAULT 'DINING';
+      CREATE INDEX IF NOT EXISTS idx_restaurant_tables_bar_seat ON restaurant_tables(is_bar_seat);
+      CREATE INDEX IF NOT EXISTS idx_restaurant_tables_type ON restaurant_tables(type);
+      CREATE INDEX IF NOT EXISTS idx_orders_bar_order ON orders(is_bar_order);
+      CREATE INDEX IF NOT EXISTS idx_orders_bartender_id ON orders(bartender_id);
+
+      -- Auto-backfill existing bar stools and VIP tables
+      UPDATE restaurant_tables
+      SET is_bar_seat = TRUE, type = 'bar', section = 'BAR'
+      WHERE (is_bar_seat IS NOT TRUE OR is_bar_seat IS NULL)
+        AND (
+          LOWER(table_number) LIKE 'bar%'
+          OR LOWER(table_number) LIKE 'b-%'
+          OR LOWER(COALESCE(location, '')) LIKE '%bar%'
+        );
+
+      UPDATE restaurant_tables
+      SET type = 'vip', section = 'VIP'
+      WHERE (type IS NULL OR type = 'dining')
+        AND (
+          LOWER(table_number) LIKE 'vip%'
+          OR LOWER(COALESCE(location, '')) LIKE '%vip%'
+        );
       ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id INTEGER REFERENCES products(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS portion_ratio NUMERIC(10,4) DEFAULT 1.0000;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS serving_size VARCHAR(50) DEFAULT 'unit';
@@ -86,6 +113,34 @@ const initializeDatabase = async () => {
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id);
+      ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+      ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+      CREATE TABLE IF NOT EXISTS kitchen_stock_audits (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        department VARCHAR(50) NOT NULL DEFAULT 'kitchen',
+        action VARCHAR(50) NOT NULL,
+        physical_count_found NUMERIC(12,3) DEFAULT 0,
+        verified_by UUID REFERENCES users(id),
+        verifier_name VARCHAR(150),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_product ON kitchen_stock_audits(product_id);
+      CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_action ON kitchen_stock_audits(action);
+      CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_created ON kitchen_stock_audits(created_at DESC);
+
+      INSERT INTO roles (name, description)
+      VALUES ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor')
+      ON CONFLICT (name) DO NOTHING;
+
+      INSERT INTO departments (name, description)
+      VALUES ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit')
+      ON CONFLICT (name) DO NOTHING;
     `);
 
     // Auto-link missing user_id on employees table

@@ -13,6 +13,8 @@ const getAllOrders = async () => {
       o.customer_id,
       o.table_id,
       o.waiter_id,
+      o.bartender_id,
+      o.is_bar_order,
       o.order_type,
       o.subtotal,
       o.discount,
@@ -25,9 +27,17 @@ const getAllOrders = async () => {
       o.updated_at,
 
       rt.table_number,
+      rt.is_bar_seat,
+      rt.type AS table_type,
+      rt.section AS table_section,
 
       e.first_name AS waiter_first_name,
       e.last_name AS waiter_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS waiter_name,
+
+      eb.first_name AS bartender_first_name,
+      eb.last_name AS bartender_last_name,
+      COALESCE(eb.first_name || ' ' || eb.last_name, ub.username) AS bartender_name,
 
       COALESCE(
         (SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid'),
@@ -41,6 +51,15 @@ const getAllOrders = async () => {
 
     LEFT JOIN employees e
       ON o.waiter_id = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
+
+    LEFT JOIN employees eb
+      ON o.bartender_id = eb.id
+
+    LEFT JOIN users ub
+      ON eb.user_id = ub.id
 
     ORDER BY o.created_at DESC
   `);
@@ -100,6 +119,8 @@ const getOrderById = async (id) => {
       o.customer_id,
       o.table_id,
       o.waiter_id,
+      o.bartender_id,
+      o.is_bar_order,
       o.order_type,
       o.subtotal,
       o.discount,
@@ -112,9 +133,17 @@ const getOrderById = async (id) => {
       o.updated_at,
 
       rt.table_number,
+      rt.is_bar_seat,
+      rt.type AS table_type,
+      rt.section AS table_section,
 
       e.first_name AS waiter_first_name,
-      e.last_name AS waiter_last_name
+      e.last_name AS waiter_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS waiter_name,
+
+      eb.first_name AS bartender_first_name,
+      eb.last_name AS bartender_last_name,
+      COALESCE(eb.first_name || ' ' || eb.last_name, ub.username) AS bartender_name
 
     FROM orders o
 
@@ -123,6 +152,15 @@ const getOrderById = async (id) => {
 
     LEFT JOIN employees e
       ON o.waiter_id = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
+
+    LEFT JOIN employees eb
+      ON o.bartender_id = eb.id
+
+    LEFT JOIN users ub
+      ON eb.user_id = ub.id
 
     WHERE o.id::text = $1 OR o.order_number = $1
     `,
@@ -219,6 +257,9 @@ const createOrder = async (order) => {
     discount,
     total,
     notes,
+    is_bar_order,
+    bartenderId,
+    bartender_id,
   } = order;
 
   const targetVipId = vipCustomerId || vip_customer_id || null;
@@ -256,11 +297,26 @@ const createOrder = async (order) => {
       }
     }
 
+    // ============================================================
+    // RESOLVE BARTENDER IDENTITY & BAR ORDER STATUS
+    // ============================================================
+    const roleName = String(order.user?.role || "").toLowerCase();
+    const isBartenderRole =
+      roleName.includes("bartender") ||
+      order.user?.role_id === 8;
+
+    let resolvedBartenderId = bartenderId || bartender_id || null;
+    if (!resolvedBartenderId && isBartenderRole && employeeId) {
+      resolvedBartenderId = employeeId;
+    }
+
 
     // ============================================================
     // VALIDATE TABLE ID & ENFORCE WAITER TABLE OWNERSHIP
     // ============================================================
     let validTableId = null;
+    let isTableBarSeat = false;
+
     if (tableId && Number.isInteger(Number(tableId)) && Number(tableId) > 0) {
       const tableCheck = await client.query(
         `
@@ -268,6 +324,7 @@ const createOrder = async (order) => {
           t.id,
           t.table_number,
           t.status,
+          t.is_bar_seat,
           t.current_waiter_id,
           e.first_name AS assigned_first_name,
           e.last_name AS assigned_last_name
@@ -283,12 +340,14 @@ const createOrder = async (order) => {
       if (tableCheck.rows.length > 0) {
         const targetTable = tableCheck.rows[0];
         validTableId = targetTable.id;
+        isTableBarSeat = Boolean(targetTable.is_bar_seat);
 
-        const roleName = String(order.user?.role || "").toLowerCase();
         const isElevatedRole =
           roleName.includes("admin") ||
           roleName.includes("manager") ||
-          roleName.includes("cashier");
+          roleName.includes("cashier") ||
+          isBartenderRole ||
+          isTableBarSeat;
 
         if (
           targetTable.status === "occupied" &&
@@ -309,6 +368,8 @@ const createOrder = async (order) => {
       }
     }
 
+    const finalIsBarOrder = Boolean(is_bar_order || isBartenderRole || isTableBarSeat);
+
 
     // ============================================================
     // CREATE MAIN ORDER
@@ -322,6 +383,8 @@ const createOrder = async (order) => {
         vip_customer_id,
         table_id,
         waiter_id,
+        bartender_id,
+        is_bar_order,
         order_type,
         subtotal,
         tax,
@@ -342,9 +405,11 @@ const createOrder = async (order) => {
         $8,
         $9,
         $10,
+        $11,
+        $12,
         'pending',
         'pending',
-        $11
+        $13
       )
       RETURNING *
       `,
@@ -354,6 +419,8 @@ const createOrder = async (order) => {
         targetVipId,
         validTableId,
         employeeId,
+        resolvedBartenderId,
+        finalIsBarOrder,
         orderType || "dine_in",
         subtotal || 0,
         tax || 0,
@@ -746,7 +813,7 @@ const createOrder = async (order) => {
         `,
         [
           createdOrder.id,
-          null,
+          resolvedBartenderId || null,
           notes || null,
         ]
       );
@@ -1078,6 +1145,9 @@ const getAllTables = async () => {
       t.table_number,
       t.capacity,
       t.location,
+      t.is_bar_seat,
+      t.type,
+      t.section,
       t.status,
       t.current_waiter_id,
       t.created_at,
@@ -1102,19 +1172,33 @@ const getAllTables = async () => {
 
 
 // ============================================================
-// CREATE RESTAURANT TABLE
+// CREATE RESTAURANT TABLE / BAR STOOL
 // ============================================================
 
 const createTable = async (data) => {
-  const { tableNumber, capacity = 2, location = null } = data;
+  const tableNumber = data.tableNumber || data.table_number;
+  const capacity = Number(data.capacity) || 2;
+  const location = data.location || null;
+  const isBarSeat = Boolean(data.is_bar_seat || data.isBarSeat);
+  const type = data.type || (isBarSeat ? "bar" : "dining");
+  const section = data.section || (isBarSeat ? "BAR" : type === "vip" ? "VIP" : "DINING");
+  const status = data.status || "available";
 
   const result = await pool.query(
     `
-    INSERT INTO restaurant_tables (table_number, capacity, location, status)
-    VALUES ($1, $2, $3, 'available')
+    INSERT INTO restaurant_tables (
+      table_number,
+      capacity,
+      location,
+      is_bar_seat,
+      type,
+      section,
+      status
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
     `,
-    [tableNumber, capacity, location]
+    [tableNumber, capacity, location, isBarSeat, type, section, status]
   );
 
   return result.rows[0];
@@ -1122,11 +1206,18 @@ const createTable = async (data) => {
 
 
 // ============================================================
-// UPDATE RESTAURANT TABLE
+// UPDATE RESTAURANT TABLE / BAR STOOL
 // ============================================================
 
 const updateTable = async (id, data) => {
-  const { tableNumber, capacity, location, status } = data;
+  const tableNumber = data.tableNumber !== undefined ? data.tableNumber : data.table_number;
+  const capacity = data.capacity !== undefined ? Number(data.capacity) : undefined;
+  const location = data.location !== undefined ? data.location : undefined;
+  const isBarSeat = data.is_bar_seat !== undefined ? Boolean(data.is_bar_seat) : (data.isBarSeat !== undefined ? Boolean(data.isBarSeat) : undefined);
+  const type = data.type !== undefined ? data.type : undefined;
+  const section = data.section !== undefined ? data.section : undefined;
+  const status = data.status !== undefined ? data.status : undefined;
+  const currentWaiterId = data.current_waiter_id !== undefined ? data.current_waiter_id : (data.currentWaiterId !== undefined ? data.currentWaiterId : undefined);
 
   const result = await pool.query(
     `
@@ -1135,15 +1226,27 @@ const updateTable = async (id, data) => {
       table_number = COALESCE($1, table_number),
       capacity = COALESCE($2, capacity),
       location = COALESCE($3, location),
-      status = COALESCE($4, status)
-    WHERE id = $5
+      is_bar_seat = COALESCE($4, is_bar_seat),
+      type = COALESCE($5, type),
+      section = COALESCE($6, section),
+      status = COALESCE($7, status),
+      current_waiter_id = CASE
+        WHEN $8::text = 'NULL' THEN NULL
+        WHEN $8::integer IS NOT NULL THEN $8::integer
+        ELSE current_waiter_id
+      END
+    WHERE id = $9
     RETURNING *
     `,
     [
-      tableNumber || null,
-      capacity || null,
-      location || null,
-      status || null,
+      tableNumber ?? null,
+      capacity ?? null,
+      location ?? null,
+      isBarSeat ?? null,
+      type ?? null,
+      section ?? null,
+      status ?? null,
+      currentWaiterId === null ? 'NULL' : (currentWaiterId ?? null),
       id,
     ]
   );
@@ -1153,20 +1256,59 @@ const updateTable = async (id, data) => {
 
 
 // ============================================================
-// DELETE RESTAURANT TABLE
+// UPDATE TABLE STATUS (e.g. occupied, available)
 // ============================================================
 
-const deleteTable = async (id) => {
+const updateTableStatus = async (id, status, waiterId = null) => {
   const result = await pool.query(
     `
-    DELETE FROM restaurant_tables
-    WHERE id = $1
+    UPDATE restaurant_tables
+    SET
+      status = $1,
+      current_waiter_id = CASE
+        WHEN $1 = 'available' THEN NULL
+        WHEN $2::integer IS NOT NULL THEN $2::integer
+        ELSE current_waiter_id
+      END
+    WHERE id = $3
     RETURNING *
     `,
-    [id]
+    [status, waiterId || null, id]
   );
 
   return result.rows[0] || null;
+};
+
+
+// ============================================================
+// DELETE RESTAURANT TABLE (WITH ORDER UNLINKING)
+// ============================================================
+
+const deleteTable = async (id) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Unlink past orders so sales history is preserved
+    await client.query(
+      `UPDATE orders SET table_id = NULL WHERE table_id = $1`,
+      [id]
+    );
+
+    // 2. Delete the table safely
+    const result = await client.query(
+      `DELETE FROM restaurant_tables WHERE id = $1 RETURNING *`,
+      [id]
+    );
+
+    await client.query("COMMIT");
+    return result.rows[0] || null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 
@@ -1634,5 +1776,6 @@ module.exports = {
   getAllTables,
   createTable,
   updateTable,
+  updateTableStatus,
   deleteTable,
 };

@@ -234,6 +234,7 @@ const createEmployee = async (employee) => {
         6: "waiter",
         7: "chef",
         8: "bartender",
+        9: "fb_controller",
       };
       if (frontendRoleMap[numId]) {
         targetRoleName = frontendRoleMap[numId];
@@ -311,6 +312,11 @@ const createEmployee = async (employee) => {
       else if (actualRoleId === 1 || actualRoleId === 2) actualDepartmentId = 1; // Admin / Manager -> Management (1)
       else if (actualRoleId === 3) actualDepartmentId = 2; // HR -> Human Resources (2)
       else if (actualRoleId === 8) actualDepartmentId = 6; // Finance -> Finance (6)
+      else if (targetRoleName === "fb_controller") {
+        const fbDept = await client.query("SELECT id FROM departments WHERE LOWER(name) = 'food & beverage' LIMIT 1");
+        if (fbDept.rows.length > 0) actualDepartmentId = fbDept.rows[0].id;
+        else actualDepartmentId = 1;
+      }
       else actualDepartmentId = 1;
     }
 
@@ -533,6 +539,7 @@ const updateEmployee = async (id, employee) => {
         6: "waiter",
         7: "chef",
         8: "bartender",
+        9: "fb_controller",
       };
       if (frontendRoleMap[rawNum]) {
         const r = await pool.query(

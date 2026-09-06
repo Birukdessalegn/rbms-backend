@@ -408,10 +408,24 @@ const getTransfers = async ({ status, toLocation, fromLocation, limit = 50 } = {
       st.created_at,
       st.updated_at,
       u_disp.username AS dispatched_by_username,
+      u_req.username AS requested_by_username,
       (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id) AS total_items,
-      (SELECT COALESCE(SUM(quantity), 0) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id) AS total_quantity
+      (SELECT COALESCE(SUM(quantity), 0) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id) AS total_quantity,
+      (
+        SELECT COALESCE(json_agg(json_build_object(
+          'id', sti.id,
+          'product_id', sti.product_id,
+          'product_name', p.name,
+          'quantity', sti.quantity,
+          'unit', p.unit
+        )), '[]'::json)
+        FROM stock_transfer_items sti
+        JOIN products p ON sti.product_id = p.id
+        WHERE sti.transfer_id = st.id
+      ) AS items
     FROM stock_transfers st
     LEFT JOIN users u_disp ON st.dispatched_by = u_disp.id
+    LEFT JOIN users u_req ON st.requested_by = u_req.id
     WHERE 1=1
   `;
   const params = [];
@@ -442,9 +456,144 @@ const getTransfers = async ({ status, toLocation, fromLocation, limit = 50 } = {
   return result.rows;
 };
 
+// ============================================================
+// APPROVE REQUISITION / TRANSFER (F&B CONTROLLER)
+// ============================================================
+
+const approveTransfer = async (id, { userId, notes } = {}) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const transferRes = await client.query(
+      `SELECT * FROM stock_transfers WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+
+    if (transferRes.rows.length === 0) {
+      throw new Error(`Transfer #${id} not found.`);
+    }
+
+    const transfer = transferRes.rows[0];
+
+    if (transfer.status !== "pending") {
+      throw new Error(`Cannot approve transfer. Status is already '${transfer.status}'.`);
+    }
+
+    const itemsRes = await client.query(
+      `SELECT sti.*, p.name AS product_name, p.unit
+       FROM stock_transfer_items sti
+       JOIN products p ON sti.product_id = p.id
+       WHERE sti.transfer_id = $1`,
+      [id]
+    );
+
+    const items = itemsRes.rows;
+    if (items.length === 0) {
+      throw new Error("No items in this transfer.");
+    }
+
+    // Process each item: deduct from main, add to kitchen/bar
+    for (const item of items) {
+      const productId = item.product_id;
+      const quantity = Number(item.quantity);
+
+      if (transfer.from_location === "main") {
+        const invRes = await client.query(
+          `SELECT quantity FROM inventory WHERE product_id = $1 FOR UPDATE`,
+          [productId]
+        );
+
+        const currentStock = invRes.rows.length > 0 ? Number(invRes.rows[0].quantity) : 0;
+        if (currentStock < quantity) {
+          throw new Error(
+            `Insufficient stock in Central Store for "${item.product_name}". Available: ${currentStock}, Requested: ${quantity}`
+          );
+        }
+
+        await client.query(
+          `UPDATE inventory SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE product_id = $2`,
+          [quantity, productId]
+        );
+
+        await client.query(
+          `INSERT INTO inventory_transactions (product_id, transaction_type, quantity, reference_type, reference_id, notes, created_by)
+           VALUES ($1, 'stock_out', $2, 'transfer_approved', $3, $4, $5)`,
+          [productId, quantity, transfer.id, `F&B Controller approved restock to ${transfer.to_location.toUpperCase()}`, userId || null]
+        );
+      }
+
+      // Add to department inventory
+      await client.query(
+        `INSERT INTO department_inventory (department, product_id, quantity, unit, updated_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (department, product_id)
+         DO UPDATE SET quantity = department_inventory.quantity + $3, updated_at = CURRENT_TIMESTAMP`,
+        [transfer.to_location, productId, quantity, item.unit || "pcs"]
+      );
+
+      await client.query(
+        `INSERT INTO department_inventory_transactions (department, product_id, transaction_type, quantity, reference_type, reference_id, notes, created_by)
+         VALUES ($1, $2, 'transfer_in', $3, 'transfer_approved', $4, $5, $6)`,
+        [transfer.to_location, productId, quantity, transfer.id, `Received from ${transfer.from_location.toUpperCase()} via F&B Controller approval`, userId || null]
+      );
+    }
+
+    // Mark transfer as completed & approved
+    await client.query(
+      `UPDATE stock_transfers
+       SET status = 'completed',
+           approved_by = $1,
+           approved_at = CURRENT_TIMESTAMP,
+           dispatched_by = COALESCE(dispatched_by, $1),
+           notes = COALESCE($2, notes),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING *`,
+      [userId || null, notes || null, id]
+    );
+
+    await client.query("COMMIT");
+
+    return getTransferById(id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
+// REJECT REQUISITION / TRANSFER (F&B CONTROLLER)
+// ============================================================
+
+const rejectTransfer = async (id, { userId, notes } = {}) => {
+  const result = await pool.query(
+    `UPDATE stock_transfers
+     SET status = 'cancelled',
+         rejection_reason = $1,
+         approved_by = $2,
+         approved_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $3 AND status = 'pending'
+     RETURNING *`,
+    [notes || "Rejected by F&B Controller", userId || null, id]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error(`Pending transfer #${id} not found or already processed.`);
+  }
+
+  return getTransferById(id);
+};
+
 module.exports = {
   createTransfer,
   requestTransfer,
+  approveTransfer,
+  rejectTransfer,
   getTransferById,
   getTransfers,
 };

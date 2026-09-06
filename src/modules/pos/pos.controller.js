@@ -247,11 +247,7 @@ const getTables = async (req, res) => {
 
 const createTable = async (req, res) => {
   try {
-    const {
-      tableNumber,
-      capacity,
-      location,
-    } = req.body;
+    const tableNumber = req.body.tableNumber || req.body.table_number;
 
     if (!tableNumber) {
       return res.status(400).json({
@@ -260,11 +256,7 @@ const createTable = async (req, res) => {
       });
     }
 
-    const table = await posService.createTable({
-      tableNumber,
-      capacity,
-      location,
-    });
+    const table = await posService.createTable(req.body);
 
     res.status(201).json({
       success: true,
@@ -313,6 +305,51 @@ const updateTable = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to update table",
+    });
+  }
+};
+
+
+// ============================================================
+// UPDATE RESTAURANT TABLE STATUS
+// ============================================================
+
+const updateTableStatus = async (req, res) => {
+  try {
+    const { status, waiterId, waiter_id } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    const effectiveWaiterId = waiterId || waiter_id || (req.user ? req.user.id : null);
+    const table = await posService.updateTableStatus(
+      req.params.id,
+      status,
+      effectiveWaiterId
+    );
+
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        message: "Table not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Table status updated successfully",
+      table,
+    });
+  } catch (error) {
+    console.error("Update restaurant table status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update table status",
     });
   }
 };
@@ -449,5 +486,6 @@ module.exports = {
   getTables,
   createTable,
   updateTable,
+  updateTableStatus,
   deleteTable,
 };

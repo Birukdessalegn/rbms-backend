@@ -22,10 +22,20 @@ const getAllBarOrders = async () => {
 
       o.order_number,
       o.table_id,
+      o.is_bar_order,
+      o.waiter_id,
       rt.table_number,
+      rt.is_bar_seat,
+      rt.type AS table_type,
+      rt.section AS table_section,
+
+      ew.first_name AS waiter_first_name,
+      ew.last_name AS waiter_last_name,
+      COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name,
 
       e.first_name AS bartender_first_name,
       e.last_name AS bartender_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS bartender_name,
 
       COALESCE(
         (
@@ -58,8 +68,17 @@ const getAllBarOrders = async () => {
     LEFT JOIN restaurant_tables rt
       ON o.table_id = rt.id
 
+    LEFT JOIN employees ew
+      ON o.waiter_id = ew.id
+
+    LEFT JOIN users uw
+      ON ew.user_id = uw.id
+
     LEFT JOIN employees e
-      ON bo.bartender_id = e.id
+      ON COALESCE(bo.bartender_id, o.bartender_id) = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
 
     ORDER BY bo.created_at DESC
   `);
@@ -88,10 +107,20 @@ const getBarOrderById = async (id) => {
 
       o.order_number,
       o.table_id,
+      o.is_bar_order,
+      o.waiter_id,
       rt.table_number,
+      rt.is_bar_seat,
+      rt.type AS table_type,
+      rt.section AS table_section,
+
+      ew.first_name AS waiter_first_name,
+      ew.last_name AS waiter_last_name,
+      COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name,
 
       e.first_name AS bartender_first_name,
-      e.last_name AS bartender_last_name
+      e.last_name AS bartender_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS bartender_name
 
     FROM bar_orders bo
 
@@ -101,8 +130,17 @@ const getBarOrderById = async (id) => {
     LEFT JOIN restaurant_tables rt
       ON o.table_id = rt.id
 
+    LEFT JOIN employees ew
+      ON o.waiter_id = ew.id
+
+    LEFT JOIN users uw
+      ON ew.user_id = uw.id
+
     LEFT JOIN employees e
-      ON bo.bartender_id = e.id
+      ON COALESCE(bo.bartender_id, o.bartender_id) = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
 
     WHERE bo.id = $1
     `,
@@ -237,7 +275,20 @@ const getBarOrdersByStatus = async (status) => {
 
       o.order_number,
       o.table_id,
-      rt.table_number
+      o.is_bar_order,
+      o.waiter_id,
+      rt.table_number,
+      rt.is_bar_seat,
+      rt.type AS table_type,
+      rt.section AS table_section,
+
+      ew.first_name AS waiter_first_name,
+      ew.last_name AS waiter_last_name,
+      COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name,
+
+      e.first_name AS bartender_first_name,
+      e.last_name AS bartender_last_name,
+      COALESCE(e.first_name || ' ' || e.last_name, u.username) AS bartender_name
 
     FROM bar_orders bo
 
@@ -246,6 +297,18 @@ const getBarOrdersByStatus = async (status) => {
 
     LEFT JOIN restaurant_tables rt
       ON o.table_id = rt.id
+
+    LEFT JOIN employees ew
+      ON o.waiter_id = ew.id
+
+    LEFT JOIN users uw
+      ON ew.user_id = uw.id
+
+    LEFT JOIN employees e
+      ON COALESCE(bo.bartender_id, o.bartender_id) = e.id
+
+    LEFT JOIN users u
+      ON e.user_id = u.id
 
     WHERE bo.status = $1
 

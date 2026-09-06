@@ -490,6 +490,7 @@ const getDepartmentInventory = async (department) => {
       p.cost_price,
       p.shots_capacity,
       p.is_shot_item,
+      p.image_url,
       pc.name AS category_name,
       pc.type AS category_type,
 
@@ -542,6 +543,7 @@ const getMultiLocationInventory = async () => {
       p.unit,
       p.shots_capacity,
       p.is_shot_item,
+      p.image_url,
       pc.name AS category_name,
       pc.type AS category_type,
 

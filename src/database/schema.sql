@@ -544,6 +544,12 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
 
     location VARCHAR(100),
 
+    is_bar_seat BOOLEAN DEFAULT FALSE,
+
+    type VARCHAR(50) DEFAULT 'dining',
+
+    section VARCHAR(50) DEFAULT 'DINING',
+
     status VARCHAR(30) DEFAULT 'available',
 
     current_waiter_id INTEGER REFERENCES employees(id),
@@ -636,6 +642,10 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_status payment_status DEFAULT 'pending',
 
     vip_customer_id INTEGER,
+
+    is_bar_order BOOLEAN DEFAULT FALSE,
+
+    bartender_id INTEGER REFERENCES employees(id),
 
     notes TEXT,
 
@@ -903,7 +913,8 @@ VALUES
     ('cashier', 'Cashier'),
     ('waiter', 'Waiter'),
     ('chef', 'Kitchen staff'),
-    ('bartender', 'Bar staff')
+    ('bartender', 'Bar staff'),
+    ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor')
 ON CONFLICT (name) DO NOTHING;
 
 
@@ -919,8 +930,39 @@ VALUES
     ('Kitchen', 'Kitchen and cooking staff'),
     ('Bar', 'Bar staff'),
     ('Finance', 'Finance and cashier staff'),
-    ('Administration', 'Administrative staff')
+    ('Administration', 'Administrative staff'),
+    ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit')
 ON CONFLICT (name) DO NOTHING;
+
+
+-- ============================================================
+-- KITCHEN STOCK AUDITS & OUT-OF-STOCK VERIFICATIONS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS kitchen_stock_audits (
+    id SERIAL PRIMARY KEY,
+
+    product_id INTEGER NOT NULL REFERENCES products(id)
+        ON DELETE CASCADE,
+
+    department VARCHAR(50) NOT NULL DEFAULT 'kitchen',
+
+    action VARCHAR(50) NOT NULL, -- 'approved_depleted', 'rejected_stock_found', 'verified_in_stock'
+
+    physical_count_found NUMERIC(12,3) DEFAULT 0,
+
+    verified_by UUID REFERENCES users(id),
+
+    verifier_name VARCHAR(150),
+
+    notes TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_product ON kitchen_stock_audits(product_id);
+CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_action ON kitchen_stock_audits(action);
+CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_created ON kitchen_stock_audits(created_at DESC);
 
 
 -- ============================================================

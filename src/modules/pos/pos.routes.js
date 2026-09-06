@@ -123,6 +123,13 @@ router.put(
   posController.updateTable
 );
 
+// Update restaurant table status
+router.put(
+  "/tables/:id/status",
+  authenticate,
+  posController.updateTableStatus
+);
+
 // Delete restaurant table
 router.delete(
   "/tables/:id",

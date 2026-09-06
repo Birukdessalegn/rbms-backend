@@ -53,6 +53,112 @@ const getTable = async (req, res) => {
 };
 
 // ============================================================
+// CREATE TABLE / BAR STOOL
+// ============================================================
+
+const createTable = async (req, res) => {
+  try {
+    const tableNumber = req.body.tableNumber || req.body.table_number;
+
+    if (!tableNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Table number is required",
+      });
+    }
+
+    const table = await tableService.createTable(req.body);
+
+    res.status(201).json({
+      success: true,
+      message: "Table created successfully",
+      table,
+    });
+  } catch (error) {
+    console.error("Create table error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to create table",
+    });
+  }
+};
+
+// ============================================================
+// UPDATE TABLE / BAR STOOL
+// ============================================================
+
+const updateTable = async (req, res) => {
+  try {
+    const table = await tableService.updateTable(req.params.id, req.body);
+
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        message: "Table not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Table updated successfully",
+      table,
+    });
+  } catch (error) {
+    console.error("Update table error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update table",
+    });
+  }
+};
+
+// ============================================================
+// UPDATE TABLE STATUS (e.g. occupied, available)
+// ============================================================
+
+const updateTableStatus = async (req, res) => {
+  try {
+    const { status, waiterId, waiter_id } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    const effectiveWaiterId = waiterId || waiter_id || (req.user ? req.user.id : null);
+    const table = await tableService.updateTableStatus(
+      req.params.id,
+      status,
+      effectiveWaiterId
+    );
+
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        message: "Table not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Table status updated successfully",
+      table,
+    });
+  } catch (error) {
+    console.error("Update table status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update table status",
+    });
+  }
+};
+
+// ============================================================
 // DELETE TABLE
 // ============================================================
 
@@ -86,5 +192,8 @@ const deleteTable = async (req, res) => {
 module.exports = {
   getTables,
   getTable,
-  deleteTable, // <-- Add export here
+  createTable,
+  updateTable,
+  updateTableStatus,
+  deleteTable,
 };

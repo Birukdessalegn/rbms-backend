@@ -147,9 +147,85 @@ const getTransferById = async (req, res) => {
   }
 };
 
+// ============================================================
+// APPROVE TRANSFER (F&B CONTROLLER)
+// ============================================================
+
+const approveTransfer = async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role === "chef" || role === "waiter" || role === "bartender") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: Kitchen staff cannot approve or reject their own restock requisitions.",
+      });
+    }
+
+    const { id } = req.params;
+    const { notes } = req.body;
+    const userId = req.user?.id || null;
+
+    const transfer = await transfersService.approveTransfer(id, {
+      userId,
+      notes,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Transfer approved and inventory dispatched successfully",
+      data: transfer,
+    });
+  } catch (error) {
+    console.error("APPROVE TRANSFER ERROR:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to approve transfer",
+    });
+  }
+};
+
+// ============================================================
+// REJECT TRANSFER (F&B CONTROLLER)
+// ============================================================
+
+const rejectTransfer = async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role === "chef" || role === "waiter" || role === "bartender") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: Kitchen staff cannot approve or reject their own restock requisitions.",
+      });
+    }
+
+    const { id } = req.params;
+    const { notes } = req.body;
+    const userId = req.user?.id || null;
+
+    const transfer = await transfersService.rejectTransfer(id, {
+      userId,
+      notes,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Transfer requisition rejected",
+      data: transfer,
+    });
+  } catch (error) {
+    console.error("REJECT TRANSFER ERROR:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to reject transfer",
+    });
+  }
+};
+
 module.exports = {
   createTransfer,
   requestTransfer,
+  approveTransfer,
+  rejectTransfer,
   getTransfers,
   getTransferById,
 };

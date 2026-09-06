@@ -203,10 +203,85 @@ const deleteKitchenOrder = async (req, res) => {
 };
 
 
+// ============================================================
+// GET KITCHEN AUDITS
+// ============================================================
+
+const getKitchenAudits = async (req, res) => {
+  try {
+    const { limit, productId, department } = req.query;
+    const audits = await kitchenService.getKitchenAudits({
+      limit: limit ? Number(limit) : 50,
+      productId: productId ? Number(productId) : undefined,
+      department: department || undefined,
+    });
+
+    res.json({
+      success: true,
+      count: audits.length,
+      audits,
+    });
+  } catch (error) {
+    console.error("Get kitchen audits error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch kitchen audits",
+    });
+  }
+};
+
+// ============================================================
+// VERIFY KITCHEN STOCK
+// ============================================================
+
+const verifyKitchenStock = async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role === "chef" || role === "waiter" || role === "bartender") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: Kitchen staff cannot conduct F&B stock audits.",
+      });
+    }
+
+    const {
+      productId,
+      department,
+      action,
+      physicalCountFound,
+      notes,
+    } = req.body;
+
+    const audit = await kitchenService.verifyKitchenStock({
+      productId,
+      department: department || "kitchen",
+      action,
+      physicalCountFound,
+      notes,
+      userId: req.user?.id,
+      verifierName: req.user?.username,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Kitchen stock verification recorded successfully",
+      audit,
+    });
+  } catch (error) {
+    console.error("Verify kitchen stock error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to record kitchen stock verification",
+    });
+  }
+};
+
 module.exports = {
   getKitchenOrders,
   getKitchenOrder,
   createKitchenOrder,
   updateKitchenOrderStatus,
   deleteKitchenOrder,
+  getKitchenAudits,
+  verifyKitchenStock,
 };

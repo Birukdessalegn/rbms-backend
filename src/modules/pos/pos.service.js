@@ -948,6 +948,17 @@ const createPayment = async (orderId, data) => {
     }
 
     // 3. Insert Payment Ledger Entry
+    let activeShiftId = null;
+    if (validReceivedBy) {
+      const shiftCheck = await client.query(
+        `SELECT id FROM cashier_shifts WHERE cashier_id = $1 AND status = 'open' ORDER BY start_time DESC LIMIT 1`,
+        [validReceivedBy]
+      );
+      if (shiftCheck.rows.length > 0) {
+        activeShiftId = shiftCheck.rows[0].id;
+      }
+    }
+
     const paymentStatusParam = status || "paid";
     const paymentResult = await client.query(
       `
@@ -961,9 +972,10 @@ const createPayment = async (orderId, data) => {
         image_url,
         receipt_image,
         vip_customer_id,
+        cashier_shift_id,
         paid_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, CURRENT_TIMESTAMP)
       RETURNING *, paid_at AS created_at
       `,
       [
@@ -975,6 +987,7 @@ const createPayment = async (orderId, data) => {
         validReceivedBy,
         finalImageUrl,
         targetVipId,
+        activeShiftId,
       ]
     );
 
@@ -1158,6 +1171,453 @@ const deleteTable = async (id) => {
 
 
 // ============================================================
+// HELPER: ADJUST DEPARTMENT INVENTORY STOCK (ADD / RESTORE)
+// ============================================================
+
+const adjustDepartmentStock = async (
+  client,
+  product,
+  quantity,
+  targetDepartment,
+  orderId,
+  orderNumber,
+  userId,
+  isRestore = false,
+  reason = ""
+) => {
+  if (!targetDepartment) return;
+
+  let stockProductId = product.id;
+  let stockProductName = product.name;
+  let stockUnit = product.unit || "pcs";
+  let effectiveQty = Number(quantity);
+
+  if (product.parent_product_id) {
+    const parentCheck = await client.query(
+      "SELECT id, name, unit FROM products WHERE id = $1",
+      [product.parent_product_id]
+    );
+    if (parentCheck.rows.length > 0) {
+      stockProductId = parentCheck.rows[0].id;
+      stockProductName = parentCheck.rows[0].name;
+      stockUnit = parentCheck.rows[0].unit || "bottle";
+      const ratio = Number(product.portion_ratio || 1.0);
+      effectiveQty = Number((quantity * ratio).toFixed(4));
+    }
+  }
+
+  const delta = isRestore ? effectiveQty : -effectiveQty;
+
+  await client.query(
+    `
+    INSERT INTO department_inventory (
+      department,
+      product_id,
+      quantity,
+      minimum_stock,
+      unit,
+      updated_at
+    )
+    VALUES ($1, $2, $3, 5, $4, CURRENT_TIMESTAMP)
+    ON CONFLICT (department, product_id)
+    DO UPDATE SET
+      quantity = department_inventory.quantity + $3,
+      updated_at = CURRENT_TIMESTAMP
+    `,
+    [targetDepartment, stockProductId, delta, stockUnit]
+  );
+
+  const txType = isRestore ? "pos_void" : "pos_sale";
+  const txNotes = isRestore
+    ? `POS Item Void - Order #${orderNumber || orderId}: ${quantity}x ${product.name} restored (${effectiveQty} ${stockUnit} to ${targetDepartment}) ${reason ? `[${reason}]` : ""}`
+    : `POS Sale - Order #${orderNumber || orderId}: ${quantity}x ${product.name} (${effectiveQty} ${stockUnit} deducted from ${targetDepartment})`;
+
+  await client.query(
+    `
+    INSERT INTO department_inventory_transactions (
+      department,
+      product_id,
+      transaction_type,
+      quantity,
+      reference_type,
+      reference_id,
+      notes,
+      created_by
+    )
+    VALUES ($1, $2, $3, $4, 'order', $5, $6, $7)
+    `,
+    [
+      targetDepartment,
+      stockProductId,
+      txType,
+      Math.abs(effectiveQty),
+      orderId,
+      txNotes,
+      userId || null,
+    ]
+  );
+};
+
+// ============================================================
+// HELPER: RECALCULATE ORDER TOTALS
+// ============================================================
+
+const recalculateOrderTotals = async (client, orderId) => {
+  const subtotalRes = await client.query(
+    `SELECT COALESCE(SUM(total), 0) AS subtotal FROM order_items WHERE order_id = $1 AND status != 'cancelled'`,
+    [orderId]
+  );
+  const subtotal = Number(parseFloat(subtotalRes.rows[0].subtotal || 0).toFixed(2));
+  const vat = Number((subtotal * 0.15).toFixed(2));
+  const serviceCharge = Number((subtotal * 0.10).toFixed(2));
+  const tax = Number((vat + serviceCharge).toFixed(2));
+
+  const orderCheck = await client.query(`SELECT discount FROM orders WHERE id = $1`, [orderId]);
+  const discount = Number(orderCheck.rows[0]?.discount || 0);
+  const total = Number(Math.max(0, subtotal - discount + tax).toFixed(2));
+
+  await client.query(
+    `UPDATE orders
+     SET subtotal = $1, tax = $2, total = $3, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $4`,
+    [subtotal, tax, total, orderId]
+  );
+};
+
+// ============================================================
+// ADD ITEMS TO EXISTING ORDER (FOOD & BAR)
+// ============================================================
+
+const addOrderItems = async (orderId, newItems = [], user = null) => {
+  if (!Array.isArray(newItems) || newItems.length === 0) {
+    throw new Error("Items array is required and must not be empty");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const orderRes = await client.query(
+      `SELECT * FROM orders WHERE id::text = $1 OR order_number = $1 FOR UPDATE`,
+      [String(orderId).trim()]
+    );
+    if (orderRes.rows.length === 0) {
+      throw new Error("Order not found");
+    }
+    const order = orderRes.rows[0];
+
+    if (order.status === "completed" || order.status === "cancelled") {
+      throw new Error(`Cannot add items to an order that is already ${order.status}`);
+    }
+    if (order.payment_status === "paid") {
+      throw new Error("Cannot add items to an order that is already fully paid and settled");
+    }
+
+    const kitchenItems = [];
+    const barItems = [];
+
+    for (const item of newItems) {
+      const rawId = item.productId || item.product_id;
+      const cleanProductId = typeof rawId === "string" && rawId.includes("_")
+        ? parseInt(rawId.split("_")[0], 10)
+        : parseInt(rawId, 10);
+
+      const productResult = await client.query(
+        `SELECT p.*, pc.type AS category_type
+         FROM products p
+         LEFT JOIN product_categories pc ON p.category_id = pc.id
+         WHERE p.id = $1`,
+        [cleanProductId]
+      );
+      if (productResult.rows.length === 0) {
+        throw new Error(`Product with ID ${cleanProductId || rawId} not found`);
+      }
+      const product = productResult.rows[0];
+      const unitPrice = Number(item.price || item.unitPrice || item.unit_price || product.price || 0);
+      const quantity = Number(item.quantity || 0);
+      if (quantity <= 0) {
+        throw new Error(`Invalid quantity for product ${product.name}`);
+      }
+      const itemTotal = Number((quantity * unitPrice).toFixed(2));
+
+      const itemResult = await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total, notes, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+         RETURNING *`,
+        [order.id, product.id, quantity, unitPrice, itemTotal, item.notes || null]
+      );
+      const createdItem = itemResult.rows[0];
+
+      const categoryType = product.category_type?.toLowerCase();
+      let targetDept = null;
+      if (categoryType === "food") {
+        targetDept = "kitchen";
+        kitchenItems.push(createdItem);
+      } else if (categoryType === "beverage" || categoryType === "bar") {
+        targetDept = "bar";
+        barItems.push(createdItem);
+      }
+
+      await adjustDepartmentStock(
+        client,
+        product,
+        quantity,
+        targetDept,
+        order.id,
+        order.order_number,
+        user?.id,
+        false
+      );
+    }
+
+    // Dispatch Kitchen items
+    if (kitchenItems.length > 0) {
+      const existingKo = await client.query(
+        `SELECT id FROM kitchen_orders WHERE order_id = $1 AND status != 'ready' AND status != 'served' ORDER BY id DESC LIMIT 1`,
+        [order.id]
+      );
+      let kitchenOrderId = existingKo.rows[0]?.id;
+      if (!kitchenOrderId) {
+        const newKo = await client.query(
+          `INSERT INTO kitchen_orders (order_id, status) VALUES ($1, 'pending') RETURNING id`,
+          [order.id]
+        );
+        kitchenOrderId = newKo.rows[0].id;
+      }
+      for (const ki of kitchenItems) {
+        await client.query(
+          `INSERT INTO kitchen_order_items (kitchen_order_id, order_item_id, quantity, status)
+           VALUES ($1, $2, $3, 'pending')`,
+          [kitchenOrderId, ki.id, ki.quantity]
+        );
+      }
+    }
+
+    // Dispatch Bar items
+    if (barItems.length > 0) {
+      const existingBo = await client.query(
+        `SELECT id FROM bar_orders WHERE order_id = $1 AND status != 'ready' AND status != 'served' ORDER BY id DESC LIMIT 1`,
+        [order.id]
+      );
+      let barOrderId = existingBo.rows[0]?.id;
+      if (!barOrderId) {
+        const newBo = await client.query(
+          `INSERT INTO bar_orders (order_id, status) VALUES ($1, 'pending') RETURNING id`,
+          [order.id]
+        );
+        barOrderId = newBo.rows[0].id;
+      }
+      for (const bi of barItems) {
+        await client.query(
+          `INSERT INTO bar_order_items (bar_order_id, order_item_id, quantity, status)
+           VALUES ($1, $2, $3, 'pending')`,
+          [barOrderId, bi.id, bi.quantity]
+        );
+      }
+    }
+
+    // Recalculate order totals
+    await recalculateOrderTotals(client, order.id);
+
+    await client.query("COMMIT");
+    return await getOrderById(order.id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
+// REMOVE / VOID ORDER ITEM (REVERSES KITCHEN/BAR & RESTORES STOCK)
+// ============================================================
+
+const removeOrderItem = async (orderId, orderItemId, options = {}, user = null) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const itemRes = await client.query(
+      `SELECT oi.*, o.status AS order_status, o.payment_status, o.order_number
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2)
+       FOR UPDATE OF oi`,
+      [Number(orderItemId), String(orderId).trim()]
+    );
+    if (itemRes.rows.length === 0) {
+      throw new Error("Order item not found on this order");
+    }
+    const item = itemRes.rows[0];
+
+    if (item.payment_status === "paid") {
+      throw new Error("Cannot void an item on an already settled order");
+    }
+    if (item.order_status === "completed") {
+      throw new Error("Cannot void an item on a completed order");
+    }
+
+    // Get product details to restore stock
+    const prodRes = await client.query(
+      `SELECT p.*, pc.type AS category_type
+       FROM products p
+       LEFT JOIN product_categories pc ON p.category_id = pc.id
+       WHERE p.id = $1`,
+      [item.product_id]
+    );
+    if (prodRes.rows.length > 0) {
+      const product = prodRes.rows[0];
+      const categoryType = product.category_type?.toLowerCase();
+      let targetDept = null;
+      if (categoryType === "food") targetDept = "kitchen";
+      else if (categoryType === "beverage" || categoryType === "bar") targetDept = "bar";
+
+      await adjustDepartmentStock(
+        client,
+        product,
+        item.quantity,
+        targetDept,
+        item.order_id,
+        item.order_number,
+        user?.id,
+        true,
+        options.reason || "Customer changed order"
+      );
+    }
+
+    // Remove from kitchen_order_items and bar_order_items
+    await client.query(`DELETE FROM kitchen_order_items WHERE order_item_id = $1`, [item.id]);
+    await client.query(`DELETE FROM bar_order_items WHERE order_item_id = $1`, [item.id]);
+
+    // Delete order_item
+    await client.query(`DELETE FROM order_items WHERE id = $1`, [item.id]);
+
+    // Recalculate order totals
+    await recalculateOrderTotals(client, item.order_id);
+
+    await client.query("COMMIT");
+    return await getOrderById(item.order_id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
+// UPDATE ORDER ITEM (QUANTITY / NOTES)
+// ============================================================
+
+const updateOrderItem = async (orderId, orderItemId, updateData = {}, user = null) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const itemRes = await client.query(
+      `SELECT oi.*, o.status AS order_status, o.payment_status, o.order_number
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2)
+       FOR UPDATE OF oi`,
+      [Number(orderItemId), String(orderId).trim()]
+    );
+    if (itemRes.rows.length === 0) {
+      throw new Error("Order item not found on this order");
+    }
+    const item = itemRes.rows[0];
+
+    if (item.payment_status === "paid") {
+      throw new Error("Cannot modify an item on an already settled order");
+    }
+    if (item.order_status === "completed" || item.order_status === "cancelled") {
+      throw new Error(`Cannot modify an item on a ${item.order_status} order`);
+    }
+
+    const oldQty = Number(item.quantity);
+    const newQty = updateData.quantity !== undefined ? Number(updateData.quantity) : oldQty;
+    const newNotes = updateData.notes !== undefined ? updateData.notes : item.notes;
+
+    if (newQty <= 0) {
+      throw new Error("Quantity must be greater than zero. To remove an item, use the void/delete endpoint.");
+    }
+
+    const diff = newQty - oldQty;
+    if (diff !== 0) {
+      const prodRes = await client.query(
+        `SELECT p.*, pc.type AS category_type
+         FROM products p
+         LEFT JOIN product_categories pc ON p.category_id = pc.id
+         WHERE p.id = $1`,
+        [item.product_id]
+      );
+      if (prodRes.rows.length > 0) {
+        const product = prodRes.rows[0];
+        const categoryType = product.category_type?.toLowerCase();
+        let targetDept = null;
+        if (categoryType === "food") targetDept = "kitchen";
+        else if (categoryType === "beverage" || categoryType === "bar") targetDept = "bar";
+
+        if (diff > 0) {
+          await adjustDepartmentStock(
+            client,
+            product,
+            diff,
+            targetDept,
+            item.order_id,
+            item.order_number,
+            user?.id,
+            false
+          );
+        } else {
+          await adjustDepartmentStock(
+            client,
+            product,
+            Math.abs(diff),
+            targetDept,
+            item.order_id,
+            item.order_number,
+            user?.id,
+            true,
+            "Quantity reduced"
+          );
+        }
+      }
+    }
+
+    const newTotal = Number((newQty * Number(item.unit_price)).toFixed(2));
+    await client.query(
+      `UPDATE order_items
+       SET quantity = $1, total = $2, notes = $3
+       WHERE id = $4`,
+      [newQty, newTotal, newNotes, item.id]
+    );
+
+    // Sync kitchen / bar items
+    await client.query(
+      `UPDATE kitchen_order_items SET quantity = $1 WHERE order_item_id = $2`,
+      [newQty, item.id]
+    );
+    await client.query(
+      `UPDATE bar_order_items SET quantity = $1 WHERE order_item_id = $2`,
+      [newQty, item.id]
+    );
+
+    // Recalculate order totals
+    await recalculateOrderTotals(client, item.order_id);
+
+    await client.query("COMMIT");
+    return await getOrderById(item.order_id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
 // EXPORTS
 // ============================================================
 
@@ -1166,6 +1626,9 @@ module.exports = {
   getOrderById,
   createOrder,
   updateOrderStatus,
+  addOrderItems,
+  removeOrderItem,
+  updateOrderItem,
   createPayment,
 
   getAllTables,

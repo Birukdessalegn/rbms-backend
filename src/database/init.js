@@ -26,12 +26,19 @@ const initializeDatabase = async () => {
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(150);
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_credit_sales NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_repayments_cash NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_expenses_cash NUMERIC(12,2) DEFAULT 0.00;
+      ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_refunds_cash NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_sales NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS total_orders_count INTEGER DEFAULT 0;
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS cashier_notes TEXT;
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS verified_by_name VARCHAR(150);
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
       CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier_status ON cashier_shifts(cashier_id, status);
+
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL;
+      ALTER TABLE customer_repayments ADD COLUMN IF NOT EXISTS received_by UUID REFERENCES users(id);
+      ALTER TABLE customer_repayments ADD COLUMN IF NOT EXISTS cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL;
 
       CREATE TABLE IF NOT EXISTS department_inventory (
         id SERIAL PRIMARY KEY,
@@ -102,12 +109,6 @@ const initializeDatabase = async () => {
       WHERE e.user_id = u.id AND e.role_id IS DISTINCT FROM u.role_id;
     `);
 
-    // Ensure cashier users ('kebe', 'emeye', 'yeshiwas') and any username containing 'cashier' have role_id = 4
-    await pool.query(`
-      UPDATE users SET role_id = 4 WHERE LOWER(username) LIKE '%cashier%' OR LOWER(username) IN ('kebe', 'yeshwaschashier');
-      UPDATE employees SET role_id = 4 WHERE department_id = 6 OR employee_code IN ('EMP-013', 'EMP-015') OR LOWER(first_name) IN ('emeye', 'yeshiwas');
-      UPDATE users SET role_id = 4 WHERE id IN (SELECT user_id FROM employees WHERE role_id = 4 AND user_id IS NOT NULL);
-    `);
 
     // Normalize finance role ID from 480 to 8 and reset roles_id_seq
     await pool.query(`

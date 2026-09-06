@@ -20,6 +20,9 @@ const getCashierShifts = async () => {
       cs.total_card_sales,
       cs.total_mobile_sales,
       cs.total_credit_sales,
+      cs.total_repayments_cash,
+      cs.total_expenses_cash,
+      cs.total_refunds_cash,
       cs.total_sales,
       cs.total_orders_count,
       cs.status,
@@ -47,6 +50,9 @@ const getCashierShifts = async () => {
     total_card_sales: parseFloat(row.total_card_sales || 0),
     total_mobile_sales: parseFloat(row.total_mobile_sales || 0),
     total_credit_sales: parseFloat(row.total_credit_sales || 0),
+    total_repayments_cash: parseFloat(row.total_repayments_cash || 0),
+    total_expenses_cash: parseFloat(row.total_expenses_cash || 0),
+    total_refunds_cash: parseFloat(row.total_refunds_cash || 0),
     total_sales: parseFloat(row.total_sales || 0),
     total_orders_count: parseInt(row.total_orders_count || 0, 10),
   }));
@@ -74,6 +80,9 @@ const getCashierShiftById = async (id) => {
       cs.total_card_sales,
       cs.total_mobile_sales,
       cs.total_credit_sales,
+      cs.total_repayments_cash,
+      cs.total_expenses_cash,
+      cs.total_refunds_cash,
       cs.total_sales,
       cs.total_orders_count,
       cs.status,
@@ -105,13 +114,14 @@ const getCashierShiftById = async (id) => {
       COUNT(*) AS transactions_count, 
       COALESCE(SUM(amount), 0) AS total_amount
     FROM payments
-    WHERE received_by = $1
+    WHERE (received_by = $1 OR cashier_shift_id = $4)
+      AND status = 'paid'
       AND paid_at >= $2
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     GROUP BY payment_method
     ORDER BY total_amount DESC
     `,
-    [shift.cashier_id, shift.start_time, shift.end_time]
+    [shift.cashier_id, shift.start_time, shift.end_time, shift.id]
   );
 
   return {
@@ -123,6 +133,9 @@ const getCashierShiftById = async (id) => {
     total_card_sales: parseFloat(shift.total_card_sales || 0),
     total_mobile_sales: parseFloat(shift.total_mobile_sales || 0),
     total_credit_sales: parseFloat(shift.total_credit_sales || 0),
+    total_repayments_cash: parseFloat(shift.total_repayments_cash || 0),
+    total_expenses_cash: parseFloat(shift.total_expenses_cash || 0),
+    total_refunds_cash: parseFloat(shift.total_refunds_cash || 0),
     total_sales: parseFloat(shift.total_sales || 0),
     total_orders_count: parseInt(shift.total_orders_count || 0, 10),
     payments_breakdown: breakdownResult.rows.map((b) => ({

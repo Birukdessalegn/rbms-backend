@@ -10,4 +10,5 @@ router.post("/", employeesController.createEmployee);
 router.put("/:id", employeesController.updateEmployee);
 router.delete("/:id", employeesController.deleteEmployee);
 router.put("/:id/activate", employeesController.activateEmployee);
+router.delete("/:id/login-account", employeesController.deleteEmployeeAccount);
 module.exports = router;

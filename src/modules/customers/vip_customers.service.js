@@ -42,15 +42,35 @@ const updateVipCustomer = async (id, data) => {
   return rows[0];
 };
 
-const recordRepayment = async (customerId, repayData) => {
+const recordRepayment = async (customerId, repayData, receivedBy = null) => {
   const { amount, method, reference, notes } = repayData;
   const repayAmt = Number(amount);
+
+  let activeShiftId = null;
+  if (receivedBy) {
+    const shiftCheck = await pool.query(
+      `SELECT id FROM cashier_shifts WHERE cashier_id = $1 AND status = 'open' ORDER BY start_time DESC LIMIT 1`,
+      [receivedBy]
+    );
+    if (shiftCheck.rows.length > 0) {
+      activeShiftId = shiftCheck.rows[0].id;
+    }
+  }
+
   const insertQuery = `
-    INSERT INTO customer_repayments (customer_id, amount, payment_method, reference, notes)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO customer_repayments (customer_id, amount, payment_method, reference, notes, received_by, cashier_shift_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *;
   `;
-  const { rows: repayRows } = await pool.query(insertQuery, [customerId, repayAmt, method || "cash", reference || null, notes || null]);
+  const { rows: repayRows } = await pool.query(insertQuery, [
+    customerId,
+    repayAmt,
+    method || "cash",
+    reference || null,
+    notes || null,
+    receivedBy || null,
+    activeShiftId,
+  ]);
   const updateDebtQuery = `
     UPDATE vip_customers
     SET current_debt = GREATEST(current_debt - $1, 0),

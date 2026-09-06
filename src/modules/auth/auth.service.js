@@ -42,13 +42,15 @@ const loginUser = async (username, password) => {
       u.password_hash,
       u.role_id,
       u.status,
-      r.name AS role
+      r.name AS role,
+      e.id AS employee_id,
+      e.status AS employee_status
      FROM users u
      LEFT JOIN roles r ON u.role_id = r.id
+     LEFT JOIN employees e ON e.user_id = u.id
      WHERE LOWER(TRIM(u.username)) = LOWER(TRIM($1))`,
     [username]
   );
-
 
   if (result.rows.length === 0) {
     throw new Error("Invalid username or password");
@@ -61,16 +63,12 @@ const loginUser = async (username, password) => {
     userId: user.id,
     roleId: user.role_id,
     status: user.status,
-    passwordMatch: await bcrypt.compare(
-      password,
-      user.password_hash
-    ),
-    hashPrefix: user.password_hash?.substring(0, 7),
+    employeeStatus: user.employee_status,
   });
 
-  // Check account status
-  if (user.status !== "active") {
-    throw new Error("User account is not active");
+  // Check account status and linked employee status
+  if (user.status !== "active" || (user.employee_status && user.employee_status !== "active")) {
+    throw new Error("Your account has been deactivated. Please contact management.");
   }
 
   // Compare password

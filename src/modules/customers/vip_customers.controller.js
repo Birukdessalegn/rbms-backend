@@ -29,7 +29,8 @@ const updateVipCustomer = async (req, res) => {
 
 const recordRepayment = async (req, res) => {
   try {
-    const result = await vipService.recordRepayment(req.params.id, req.body);
+    const receivedBy = req.user?.id || req.body.receivedBy || null;
+    const result = await vipService.recordRepayment(req.params.id, req.body, receivedBy);
     res.json({ success: true, message: "Repayment recorded", data: result });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });

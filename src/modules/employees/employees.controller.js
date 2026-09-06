@@ -186,14 +186,40 @@ const deleteEmployee = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Employee deleted successfully",
+      message: "Employee deactivated successfully",
     });
   } catch (error) {
     console.error("Delete employee error:", error);
 
     res.status(500).json({
       success: false,
-      message: "Failed to delete employee",
+      message: "Failed to deactivate employee",
+    });
+  }
+};
+
+// DELETE /api/employees/:id/login-account
+const deleteEmployeeAccount = async (req, res) => {
+  try {
+    const result = await employeesService.deleteEmployeeAccount(req.params.id);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: result.message || "Employee login account removed successfully.",
+    });
+  } catch (error) {
+    console.error("Delete employee login account error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to remove employee login account",
     });
   }
 };
@@ -206,4 +232,5 @@ module.exports = {
   updateEmployee,
   deleteEmployee,
   activateEmployee,
+  deleteEmployeeAccount,
 };

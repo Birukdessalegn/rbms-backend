@@ -1,10 +1,11 @@
 const pool = require("../../config/database");
 
 /**
- * Normalizes payment method classification into standard POS buckets
+ * Normalizes payment method classification and calculates all cash drawer inflows/outflows
  */
-const getPaymentSalesStats = async (cashierId, startTime, endTime = null) => {
-  const result = await pool.query(
+const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftId = null) => {
+  // 1. Successful paid orders
+  const salesResult = await pool.query(
     `
     SELECT 
       COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) AS cash_sales,
@@ -14,13 +15,15 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null) => {
       COALESCE(SUM(amount), 0) AS total_sales,
       COUNT(DISTINCT order_id) AS total_orders_count
     FROM payments
-    WHERE received_by = $1
+    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
+      AND status = 'paid'
       AND paid_at >= $2
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     `,
-    [cashierId, startTime, endTime]
+    [cashierId, startTime, endTime, shiftId]
   );
 
+  // 2. Breakdown of paid orders by method
   const breakdownResult = await pool.query(
     `
     SELECT 
@@ -28,16 +31,75 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null) => {
       COUNT(*) AS transactions_count, 
       COALESCE(SUM(amount), 0) AS total_amount
     FROM payments
-    WHERE received_by = $1
+    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
+      AND status = 'paid'
       AND paid_at >= $2
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     GROUP BY payment_method
     ORDER BY total_amount DESC
     `,
+    [cashierId, startTime, endTime, shiftId]
+  );
+
+  // 3. Customer cash refunds
+  const refundsResult = await pool.query(
+    `
+    SELECT COALESCE(SUM(amount), 0) AS cash_refunds
+    FROM payments
+    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
+      AND status = 'refunded'
+      AND LOWER(payment_method) = 'cash'
+      AND paid_at >= $2
+      AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
+    `,
+    [cashierId, startTime, endTime, shiftId]
+  );
+
+  // 4. VIP Debt repayments collected in cash
+  const repaymentsResult = await pool.query(
+    `
+    SELECT COALESCE(SUM(amount), 0) AS repayments_cash
+    FROM customer_repayments
+    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
+      AND LOWER(payment_method) = 'cash'
+      AND created_at >= $2
+      AND ($3::timestamp IS NULL OR created_at <= $3::timestamp)
+    `,
+    [cashierId, startTime, endTime, shiftId]
+  );
+
+  // 5. Drawer cash expenses / paid outs
+  const expensesResult = await pool.query(
+    `
+    SELECT COALESCE(SUM(amount), 0) AS expenses_cash
+    FROM expenses
+    WHERE created_by = $1
+      AND LOWER(payment_method) = 'cash'
+      AND created_at >= $2
+      AND ($3::timestamp IS NULL OR created_at <= $3::timestamp)
+    `,
     [cashierId, startTime, endTime]
   );
 
-  const row = result.rows[0];
+  // 6. Open / unsettled orders created during shift
+  const openOrdersResult = await pool.query(
+    `
+    SELECT COUNT(DISTINCT id) AS open_orders_count
+    FROM orders
+    WHERE status NOT IN ('completed', 'cancelled')
+      AND payment_status != 'paid'
+      AND created_at >= $1
+      AND ($2::timestamp IS NULL OR created_at <= $2::timestamp)
+    `,
+    [startTime, endTime]
+  );
+
+  const row = salesResult.rows[0];
+  const cashRefunds = parseFloat(refundsResult.rows[0]?.cash_refunds || 0);
+  const repaymentsCash = parseFloat(repaymentsResult.rows[0]?.repayments_cash || 0);
+  const expensesCash = parseFloat(expensesResult.rows[0]?.expenses_cash || 0);
+  const openOrdersCount = parseInt(openOrdersResult.rows[0]?.open_orders_count || 0, 10);
+
   return {
     cashSales: parseFloat(row.cash_sales || 0),
     cardSales: parseFloat(row.card_sales || 0),
@@ -45,6 +107,10 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null) => {
     creditSales: parseFloat(row.credit_sales || 0),
     totalSales: parseFloat(row.total_sales || 0),
     totalOrdersCount: parseInt(row.total_orders_count || 0, 10),
+    cashRefunds,
+    repaymentsCash,
+    expensesCash,
+    openOrdersCount,
     breakdown: breakdownResult.rows.map((b) => ({
       paymentMethod: b.payment_method,
       transactionsCount: parseInt(b.transactions_count, 10),
@@ -57,7 +123,7 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null) => {
 // GET CURRENT SHIFT FOR CASHIER
 // ============================================================
 const getCurrentShift = async (cashierId) => {
-  // 1. Check for an active open shift
+  // 1. Check for active open shift
   const openResult = await pool.query(
     `
     SELECT 
@@ -99,41 +165,35 @@ const getCurrentShift = async (cashierId) => {
     return null;
   }
 
-  // 3. If the shift is open, compute live totals
-  if (shift.status === "open") {
-    const liveStats = await getPaymentSalesStats(cashierId, shift.start_time, null);
-    const openingCash = parseFloat(shift.opening_cash || 0);
-    const expectedCash = openingCash + liveStats.cashSales;
+  // 3. Compute stats
+  const isLive = shift.status === "open";
+  const stats = await getPaymentSalesStats(
+    cashierId,
+    shift.start_time,
+    isLive ? null : shift.end_time,
+    shift.id
+  );
 
-    return {
-      ...shift,
-      opening_cash: openingCash,
-      expected_cash: expectedCash,
-      total_card_sales: liveStats.cardSales,
-      total_mobile_sales: liveStats.mobileSales,
-      total_credit_sales: liveStats.creditSales,
-      total_sales: liveStats.totalSales,
-      total_orders_count: liveStats.totalOrdersCount,
-      payments_breakdown: liveStats.breakdown,
-      is_live: true,
-    };
-  }
+  const openingCash = parseFloat(shift.opening_cash || 0);
+  const expectedCash = openingCash + stats.cashSales + stats.repaymentsCash - stats.expensesCash - stats.cashRefunds;
 
-  // If already closed, also return payment breakdown
-  const stats = await getPaymentSalesStats(cashierId, shift.start_time, shift.end_time);
   return {
     ...shift,
-    opening_cash: parseFloat(shift.opening_cash || 0),
-    expected_cash: parseFloat(shift.expected_cash || 0),
+    opening_cash: openingCash,
+    expected_cash: isLive ? expectedCash : parseFloat(shift.expected_cash || expectedCash),
     actual_cash: parseFloat(shift.actual_cash || 0),
     shortage_overage: parseFloat(shift.shortage_overage || 0),
-    total_card_sales: parseFloat(shift.total_card_sales || 0),
-    total_mobile_sales: parseFloat(shift.total_mobile_sales || 0),
-    total_credit_sales: parseFloat(shift.total_credit_sales || 0),
-    total_sales: parseFloat(shift.total_sales || 0),
-    total_orders_count: parseInt(shift.total_orders_count || 0, 10),
+    total_card_sales: isLive ? stats.cardSales : parseFloat(shift.total_card_sales || 0),
+    total_mobile_sales: isLive ? stats.mobileSales : parseFloat(shift.total_mobile_sales || 0),
+    total_credit_sales: isLive ? stats.creditSales : parseFloat(shift.total_credit_sales || 0),
+    total_repayments_cash: isLive ? stats.repaymentsCash : parseFloat(shift.total_repayments_cash || 0),
+    total_expenses_cash: isLive ? stats.expensesCash : parseFloat(shift.total_expenses_cash || 0),
+    total_refunds_cash: isLive ? stats.cashRefunds : parseFloat(shift.total_refunds_cash || 0),
+    total_sales: isLive ? stats.totalSales : parseFloat(shift.total_sales || 0),
+    total_orders_count: isLive ? stats.totalOrdersCount : parseInt(shift.total_orders_count || 0, 10),
+    open_unpaid_orders_count: stats.openOrdersCount,
     payments_breakdown: stats.breakdown,
-    is_live: false,
+    is_live: isLive,
   };
 };
 
@@ -183,12 +243,15 @@ const startShift = async (cashierId, shiftData = {}) => {
       total_card_sales,
       total_mobile_sales,
       total_credit_sales,
+      total_repayments_cash,
+      total_expenses_cash,
+      total_refunds_cash,
       total_sales,
       total_orders_count,
       status,
       updated_at
     )
-    VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $4, 0, 0, 0, 0, 0, 0, 0, 'open', CURRENT_TIMESTAMP)
+    VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 'open', CURRENT_TIMESTAMP)
     RETURNING *
     `,
     [cashierId, cashierName, terminal, initialCash]
@@ -200,6 +263,7 @@ const startShift = async (cashierId, shiftData = {}) => {
     cashier_display_name: cashierName,
     opening_cash: parseFloat(newShift.opening_cash),
     expected_cash: parseFloat(newShift.expected_cash),
+    open_unpaid_orders_count: 0,
     payments_breakdown: [],
   };
 };
@@ -227,10 +291,10 @@ const closeShift = async (cashierId, closingData = {}) => {
     throw new Error("No active open shift found to close.");
   }
 
-  // 2. Compute final sales stats up to current moment
-  const stats = await getPaymentSalesStats(cashierId, shift.start_time, null);
+  // 2. Compute final stats
+  const stats = await getPaymentSalesStats(cashierId, shift.start_time, null, shift.id);
   const openingCash = parseFloat(shift.opening_cash || 0);
-  const expectedCash = openingCash + stats.cashSales;
+  const expectedCash = openingCash + stats.cashSales + stats.repaymentsCash - stats.expensesCash - stats.cashRefunds;
   const shortageOverage = countedCash - expectedCash;
 
   // 3. Update shift to closed_pending_approval
@@ -245,12 +309,15 @@ const closeShift = async (cashierId, closingData = {}) => {
       total_card_sales = $4,
       total_mobile_sales = $5,
       total_credit_sales = $6,
-      total_sales = $7,
-      total_orders_count = $8,
-      cashier_notes = $9,
+      total_repayments_cash = $7,
+      total_expenses_cash = $8,
+      total_refunds_cash = $9,
+      total_sales = $10,
+      total_orders_count = $11,
+      cashier_notes = $12,
       status = 'closed_pending_approval',
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $10
+    WHERE id = $13
     RETURNING *
     `,
     [
@@ -260,6 +327,9 @@ const closeShift = async (cashierId, closingData = {}) => {
       stats.cardSales,
       stats.mobileSales,
       stats.creditSales,
+      stats.repaymentsCash,
+      stats.expensesCash,
+      stats.cashRefunds,
       stats.totalSales,
       stats.totalOrdersCount,
       notes,
@@ -277,8 +347,12 @@ const closeShift = async (cashierId, closingData = {}) => {
     total_card_sales: stats.cardSales,
     total_mobile_sales: stats.mobileSales,
     total_credit_sales: stats.creditSales,
+    total_repayments_cash: stats.repaymentsCash,
+    total_expenses_cash: stats.expensesCash,
+    total_refunds_cash: stats.cashRefunds,
     total_sales: stats.totalSales,
     total_orders_count: stats.totalOrdersCount,
+    open_unpaid_orders_count: stats.openOrdersCount,
     payments_breakdown: stats.breakdown,
   };
 };

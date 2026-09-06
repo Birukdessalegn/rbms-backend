@@ -349,11 +349,101 @@ const deleteTable = async (req, res) => {
       message: error.message || "Failed to delete table",
     });
   }
-};module.exports = {
+};
+
+// ============================================================
+// ADD ITEMS TO ORDER (FOOD / BAR)
+// ============================================================
+
+const addOrderItems = async (req, res) => {
+  try {
+    const { items } = req.body;
+    const orderId = req.params.id;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Items array is required",
+      });
+    }
+
+    const updatedOrder = await posService.addOrderItems(orderId, items, req.user);
+
+    return res.status(200).json({
+      success: true,
+      message: "Items added to order successfully",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    console.error("Add order items error:", error);
+    const statusCode = error.message && error.message.includes("not found") ? 404 : 400;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to add items to order",
+    });
+  }
+};
+
+// ============================================================
+// REMOVE / VOID ORDER ITEM
+// ============================================================
+
+const removeOrderItem = async (req, res) => {
+  try {
+    const { id: orderId, itemId } = req.params;
+    const { reason } = req.body;
+
+    const updatedOrder = await posService.removeOrderItem(orderId, itemId, { reason }, req.user);
+
+    return res.status(200).json({
+      success: true,
+      message: "Order item voided successfully and inventory restored",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    console.error("Remove order item error:", error);
+    const statusCode = error.message && error.message.includes("not found") ? 404 : 400;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to remove order item",
+    });
+  }
+};
+
+// ============================================================
+// UPDATE ORDER ITEM (QUANTITY / NOTES)
+// ============================================================
+
+const updateOrderItem = async (req, res) => {
+  try {
+    const { id: orderId, itemId } = req.params;
+    const { quantity, notes } = req.body;
+
+    const updatedOrder = await posService.updateOrderItem(orderId, itemId, { quantity, notes }, req.user);
+
+    return res.status(200).json({
+      success: true,
+      message: "Order item updated successfully",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    console.error("Update order item error:", error);
+    const statusCode = error.message && error.message.includes("not found") ? 404 : 400;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to update order item",
+    });
+  }
+};
+
+module.exports = {
   getOrders,
   getOrder,
   createOrder,
   updateOrderStatus,
+  addOrderItems,
+  removeOrderItem,
+  updateOrderItem,
   createPayment,
 
   getTables,

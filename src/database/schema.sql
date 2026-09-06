@@ -783,7 +783,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
     receipt_image TEXT,
 
-    vip_customer_id INTEGER
+    vip_customer_id INTEGER,
+
+    cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL
 );
 
 
@@ -1077,6 +1079,12 @@ CREATE TABLE IF NOT EXISTS cashier_shifts (
 
     total_credit_sales NUMERIC(12,2) DEFAULT 0.00,
 
+    total_repayments_cash NUMERIC(12,2) DEFAULT 0.00,
+
+    total_expenses_cash NUMERIC(12,2) DEFAULT 0.00,
+
+    total_refunds_cash NUMERIC(12,2) DEFAULT 0.00,
+
     total_sales NUMERIC(12,2) DEFAULT 0.00,
 
     total_orders_count INTEGER DEFAULT 0,
@@ -1135,6 +1143,8 @@ CREATE TABLE IF NOT EXISTS customer_repayments (
     payment_method VARCHAR(50) DEFAULT 'cash',
     reference VARCHAR(255),
     notes TEXT,
+    received_by UUID REFERENCES users(id),
+    cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

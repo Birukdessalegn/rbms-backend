@@ -682,45 +682,177 @@ const updateEmployee = async (id, employee) => {
 
 
 // =========================================================
-// DEACTIVATE EMPLOYEE
+// DEACTIVATE EMPLOYEE (Synchronizes User Account)
 // =========================================================
 
 const deleteEmployee = async (id) => {
-  const result = await pool.query(
-    `
-    UPDATE employees
-    SET
-      status = 'inactive',
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = $1
-    RETURNING *
-    `,
-    [id]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  return result.rows[0];
+    const result = await client.query(
+      `
+      UPDATE employees
+      SET
+        status = 'inactive',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const employee = result.rows[0];
+
+    // Also deactivate linked user account so they cannot log in
+    if (employee.user_id) {
+      await client.query(
+        `
+        UPDATE users
+        SET
+          status = 'inactive',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [employee.user_id]
+      );
+    }
+
+    await client.query("COMMIT");
+    return employee;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 // =========================================================
-// ACTIVATE EMPLOYEE
+// ACTIVATE EMPLOYEE (Synchronizes User Account)
 // =========================================================
 
 const activateEmployee = async (id) => {
-  const result = await pool.query(
-    `
-    UPDATE employees
-    SET
-      status = 'active',
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = $1
-    RETURNING *
-    `,
-    [id]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  return result.rows[0];
+    const result = await client.query(
+      `
+      UPDATE employees
+      SET
+        status = 'active',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const employee = result.rows[0];
+
+    // Also reactivate linked user account
+    if (employee.user_id) {
+      await client.query(
+        `
+        UPDATE users
+        SET
+          status = 'active',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [employee.user_id]
+      );
+    }
+
+    await client.query("COMMIT");
+    return employee;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
+// =========================================================
+// DELETE EMPLOYEE LOGIN ACCOUNT ONLY (Preserves Sales/Work History)
+// =========================================================
+
+const deleteEmployeeAccount = async (id) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Fetch employee to find user_id
+    const empRes = await client.query(
+      `SELECT id, first_name, last_name, user_id FROM employees WHERE id = $1`,
+      [id]
+    );
+
+    if (empRes.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const employee = empRes.rows[0];
+    const userId = employee.user_id;
+
+    if (!userId) {
+      await client.query("ROLLBACK");
+      return { employee, message: "Employee does not have an active login account" };
+    }
+
+    // 2. Disconnect login account from employee record
+    await client.query(
+      `UPDATE employees SET user_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [id]
+    );
+
+    // 3. Delete or permanently sanitize user account so credentials can never be used
+    try {
+      // Attempt hard delete if no historical foreign keys exist
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    } catch (fkErr) {
+      // If historical orders/shifts/payments reference this user ID, permanently disable credentials
+      await client.query(
+        `
+        UPDATE users
+        SET
+          status = 'inactive',
+          password_hash = 'DISABLED_' || gen_random_uuid(),
+          username = 'disabled_user_' || substring(id::text, 1, 8),
+          email = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [userId]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      success: true,
+      message: "Employee login account deleted successfully. Work and sales history preserved.",
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
 
 // =========================================================
 // EXPORT
@@ -733,4 +865,5 @@ module.exports = {
   updateEmployee,
   deleteEmployee,
   activateEmployee,
+  deleteEmployeeAccount,
 };

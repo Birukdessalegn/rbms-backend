@@ -64,6 +64,27 @@ router.put(
   posController.updateOrderStatus
 );
 
+// Add items to existing order (food or bar)
+router.post(
+  "/orders/:id/items",
+  authenticate,
+  posController.addOrderItems
+);
+
+// Remove/void item from order (cancels in kitchen/bar and restores inventory)
+router.delete(
+  "/orders/:id/items/:itemId",
+  authenticate,
+  posController.removeOrderItem
+);
+
+// Update order item (quantity or notes)
+router.put(
+  "/orders/:id/items/:itemId",
+  authenticate,
+  posController.updateOrderItem
+);
+
 // Make payment (supports both :id and :orderId URL parameters)
 router.post(
   "/orders/:id/payment",

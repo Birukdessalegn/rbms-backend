@@ -25,7 +25,12 @@ o.payment_status,
       rt.table_number,
 
       e.first_name AS chef_first_name,
-      e.last_name AS chef_last_name
+      e.last_name AS chef_last_name,
+
+      o.waiter_id,
+      ew.first_name AS waiter_first_name,
+      ew.last_name AS waiter_last_name,
+      COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name
 
     FROM kitchen_orders ko
 
@@ -37,6 +42,12 @@ o.payment_status,
 
     LEFT JOIN employees e
       ON ko.chef_id = e.id
+
+    LEFT JOIN employees ew
+      ON o.waiter_id = ew.id
+
+    LEFT JOIN users uw
+      ON ew.user_id = uw.id
 
     ORDER BY ko.created_at DESC
   `);

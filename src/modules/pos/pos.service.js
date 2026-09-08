@@ -98,8 +98,48 @@ const getAllOrders = async () => {
       paymentsByOrderId[payment.order_id].push(payment);
     }
 
+    // Fetch order items with product details for all orders
+    const itemsResult = await pool.query(
+      `
+      SELECT
+        oi.id,
+        oi.order_id,
+        oi.product_id,
+        oi.quantity,
+        COALESCE(oi.paid_quantity, 0) AS paid_quantity,
+        oi.unit_price,
+        oi.discount,
+        oi.total,
+        oi.notes,
+        oi.status,
+        p.name AS product_name,
+        p.unit,
+        p.shots_capacity,
+        p.is_shot_item,
+        p.portion_ratio,
+        p.serving_size,
+        pc.name AS category_name,
+        pc.type AS category_type
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      LEFT JOIN product_categories pc ON p.category_id = pc.id
+      WHERE oi.order_id = ANY($1::int[])
+      ORDER BY oi.id ASC
+      `,
+      [orderIds]
+    );
+
+    const itemsByOrderId = {};
+    for (const item of itemsResult.rows) {
+      if (!itemsByOrderId[item.order_id]) {
+        itemsByOrderId[item.order_id] = [];
+      }
+      itemsByOrderId[item.order_id].push(item);
+    }
+
     for (const order of orders) {
       order.payments = paymentsByOrderId[order.id] || [];
+      order.items = itemsByOrderId[order.id] || [];
     }
   }
 

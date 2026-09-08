@@ -675,6 +675,8 @@ CREATE TABLE IF NOT EXISTS order_items (
 
     total NUMERIC(12,2) NOT NULL,
 
+    paid_quantity NUMERIC(12,3) DEFAULT 0,
+
     notes TEXT,
 
     status order_status DEFAULT 'pending'
@@ -795,7 +797,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
     vip_customer_id INTEGER,
 
-    cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL
+    cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL,
+
+    split_items JSONB DEFAULT NULL
 );
 
 

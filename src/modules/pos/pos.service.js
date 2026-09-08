@@ -78,6 +78,7 @@ const getAllOrders = async () => {
         reference,
         status,
         paid_at,
+        split_items,
         COALESCE(receipt_image, image_url) AS image_url,
         COALESCE(receipt_image, image_url) AS receipt_image,
         COALESCE(receipt_image, image_url) AS receipt_url,
@@ -184,6 +185,7 @@ const getOrderById = async (id) => {
       oi.id,
       oi.product_id,
       oi.quantity,
+      COALESCE(oi.paid_quantity, 0) AS paid_quantity,
       oi.unit_price,
       oi.discount,
       oi.total,
@@ -221,6 +223,7 @@ const getOrderById = async (id) => {
       reference,
       status,
       paid_at,
+      split_items,
       COALESCE(receipt_image, image_url) AS image_url,
       COALESCE(receipt_image, image_url) AS receipt_image,
       COALESCE(receipt_image, image_url) AS receipt_url,
@@ -1026,6 +1029,11 @@ const createPayment = async (orderId, data) => {
       }
     }
 
+    const splitList = Array.isArray(data.splitItems)
+      ? data.splitItems
+      : (Array.isArray(data.split_items) ? data.split_items : null);
+    const splitJson = splitList && splitList.length > 0 ? JSON.stringify(splitList) : null;
+
     const paymentStatusParam = status || "paid";
     const paymentResult = await client.query(
       `
@@ -1040,9 +1048,10 @@ const createPayment = async (orderId, data) => {
         receipt_image,
         vip_customer_id,
         cashier_shift_id,
+        split_items,
         paid_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, CURRENT_TIMESTAMP)
       RETURNING *, paid_at AS created_at
       `,
       [
@@ -1055,6 +1064,7 @@ const createPayment = async (orderId, data) => {
         finalImageUrl,
         targetVipId,
         activeShiftId,
+        splitJson,
       ]
     );
 
@@ -1063,6 +1073,22 @@ const createPayment = async (orderId, data) => {
         `UPDATE orders SET vip_customer_id = $1 WHERE id = $2 AND vip_customer_id IS NULL`,
         [targetVipId, realNumericDbId]
       );
+    }
+
+    // Update item-level paid quantities if specific split items were paid
+    if (splitList && splitList.length > 0) {
+      for (const sItem of splitList) {
+        const itemId = sItem.id || sItem.order_item_id || sItem.orderItemId || sItem.item_id;
+        const qtyPaid = Number(sItem.selectedQuantity ?? sItem.quantity ?? sItem.qty ?? 0);
+        if (itemId && qtyPaid > 0) {
+          await client.query(
+            `UPDATE order_items
+             SET paid_quantity = LEAST(quantity, COALESCE(paid_quantity, 0) + $1)
+             WHERE id = $2 AND order_id = $3`,
+            [qtyPaid, itemId, realNumericDbId]
+          );
+        }
+      }
     }
 
     const createdPayment = paymentResult.rows[0];
@@ -1104,6 +1130,14 @@ const createPayment = async (orderId, data) => {
       [dbPaymentStatus, dbOrderStatus, realNumericDbId]
     );
 
+    // If order is fully paid, ensure all order items are marked 100% paid
+    if (isFullyPaid) {
+      await client.query(
+        `UPDATE order_items SET paid_quantity = quantity WHERE order_id = $1`,
+        [realNumericDbId]
+      );
+    }
+
     // Release table if order is fully settled
     if (isFullyPaid && order.table_id) {
       await client.query(
@@ -1123,6 +1157,7 @@ const createPayment = async (orderId, data) => {
       totalPaid,
       remainingBalance,
       isFullyPaid,
+      splitItems: splitList,
     };
   } catch (error) {
     await client.query("ROLLBACK");

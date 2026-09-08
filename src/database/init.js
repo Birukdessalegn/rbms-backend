@@ -64,6 +64,16 @@ const initializeDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier_status ON cashier_shifts(cashier_id, status);
 
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS split_items JSONB DEFAULT NULL;
+      ALTER TABLE order_items ADD COLUMN IF NOT EXISTS paid_quantity NUMERIC(12,3) DEFAULT 0;
+
+      -- Backfill paid_quantity for orders that are already fully paid
+      UPDATE order_items oi
+      SET paid_quantity = oi.quantity
+      FROM orders o
+      WHERE oi.order_id = o.id
+        AND o.payment_status = 'paid'
+        AND (oi.paid_quantity IS NULL OR oi.paid_quantity = 0);
       ALTER TABLE customer_repayments ADD COLUMN IF NOT EXISTS received_by UUID REFERENCES users(id);
       ALTER TABLE customer_repayments ADD COLUMN IF NOT EXISTS cashier_shift_id INTEGER REFERENCES cashier_shifts(id) ON DELETE SET NULL;
 

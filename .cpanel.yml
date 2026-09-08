@@ -1,6 +1,6 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/ambbatxv/theoakapi.ambbatech.com/
+    - export DEPLOYPATH=/home/ambbatxv/kasinahotelapi.ambbatech.com/
     - /bin/cp -R * $DEPLOYPATH
     - cd $DEPLOYPATH && /bin/mkdir -p tmp && /bin/touch tmp/restart.txt

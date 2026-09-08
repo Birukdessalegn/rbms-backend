@@ -12,7 +12,7 @@
   "devDependencies": {
     "nodemon": "^3.1.14"
   },
-  "name": "rbms-backend",
+  "name": "kasina-backend",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -22,14 +22,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Birukdessalegn/rbms-backend.git"
+    "url": "git+https://github.com/Birukdessalegn/Kasina-backend.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/Birukdessalegn/rbms-backend/issues"
+    "url": "https://github.com/Birukdessalegn/Kasina-backend/issues"
   },
-  "homepage": "https://github.com/Birukdessalegn/rbms-backend#readme"
+  "homepage": "https://github.com/Birukdessalegn/Kasina-backend#readme"
 }

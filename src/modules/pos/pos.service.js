@@ -714,6 +714,7 @@ const createOrder = async (order) => {
 
           if (remainingQty <= minQty) {
             deptLowStockAlerts.push({
+              productId: stockProductId,
               productName: stockProductName,
               department: targetDepartment,
               remaining: remainingQty,
@@ -916,12 +917,17 @@ const createOrder = async (order) => {
     // SEND LOW STOCK NOTIFICATIONS FOR BAR / KITCHEN
     // ============================================================
     for (const alert of deptLowStockAlerts) {
+      const targetRoles = ["admin", "manager", "fb_controller", "storekeeper"];
+      if (alert.department === "bar" && !targetRoles.includes("bartender")) targetRoles.push("bartender");
+      if (alert.department === "kitchen" && !targetRoles.includes("chef")) targetRoles.push("chef");
+
       notificationsService.createNotification({
-        targetRoles: ["admin", "manager", "fb_controller", "storekeeper"],
+        targetRoles,
         title: `${alert.department.toUpperCase()} Low Stock Alert`,
         message: `"${alert.productName}" in ${alert.department.toUpperCase()} is running low (${alert.remaining} remaining, minimum: ${alert.min}). F&B restock required!`,
         type: "warning",
         referenceType: "department_low_stock",
+        referenceId: alert.productId || null,
       }).catch((err) => console.error("Error sending department low stock notification:", err.message));
     }
 

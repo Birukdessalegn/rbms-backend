@@ -153,6 +153,7 @@ const createTransfer = async ({
         const minMainStock = Number(updatedMain.rows[0].minimum_stock || 0);
         if (newMainQty <= minMainStock) {
           lowStockAlerts.push({
+            id: productId,
             name: product.name,
             location: "Central Store",
             remaining: newMainQty,
@@ -245,6 +246,7 @@ const createTransfer = async ({
         message: `"${alert.name}" in Central Store is down to ${alert.remaining} (Minimum: ${alert.min}). Supplier reorder recommended.`,
         type: "warning",
         referenceType: "inventory_low_stock",
+        referenceId: alert.id,
       });
     }
 

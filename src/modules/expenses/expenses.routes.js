@@ -26,6 +26,43 @@ router.get(
 );
 
 
+// Recurring expenses
+router.get(
+  "/recurring",
+  expensesController.getRecurringExpenses
+);
+
+router.post(
+  "/recurring",
+  expensesController.createRecurringExpense
+);
+
+router.post(
+  "/recurring/check-due",
+  expensesController.triggerRecurringNotifications
+);
+
+router.get(
+  "/recurring/:id",
+  expensesController.getRecurringExpense
+);
+
+router.put(
+  "/recurring/:id",
+  expensesController.updateRecurringExpense
+);
+
+router.delete(
+  "/recurring/:id",
+  expensesController.deleteRecurringExpense
+);
+
+router.post(
+  "/recurring/:id/pay",
+  expensesController.payRecurringExpense
+);
+
+
 // Single expense
 router.get(
   "/:id",

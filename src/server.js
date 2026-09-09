@@ -19,6 +19,28 @@ const startServer = async () => {
       console.log(
         `🚀 RBMS Backend running on port ${PORT} (Network accessible)`
       );
+
+      // Initialize recurring expenses automated check & notification scheduler
+      try {
+        const { checkDueRecurringExpensesAndNotify } = require("./modules/expenses/recurringExpenses.service");
+        // Initial run 5 seconds after startup
+        setTimeout(() => {
+          checkDueRecurringExpensesAndNotify().catch((err) =>
+            console.error("Initial recurring expense check failed:", err)
+          );
+        }, 5000);
+
+        // Periodic check every 2 hours
+        setInterval(() => {
+          checkDueRecurringExpensesAndNotify().catch((err) =>
+            console.error("Scheduled recurring expense check failed:", err)
+          );
+        }, 2 * 60 * 60 * 1000);
+
+        console.log("⏰ Recurring expenses reminder scheduler started");
+      } catch (schedErr) {
+        console.error("Failed to start recurring expenses scheduler:", schedErr);
+      }
     });
   } catch (error) {
     console.error("❌ Failed to start RBMS backend");

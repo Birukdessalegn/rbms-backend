@@ -1,4 +1,5 @@
 const pool = require("../../config/database");
+const notificationsService = require("../notifications/notifications.service");
 
 // ============================================================
 // GET ALL EXPENSES
@@ -126,7 +127,20 @@ const createExpense = async (data) => {
     ]
   );
 
-  return result.rows[0];
+  const created = result.rows[0];
+
+  notificationsService
+    .createNotification({
+      targetRoles: ["admin", "manager", "finance"],
+      title: "New Expense Recorded",
+      message: `Expense "${description}" (${Number(amount).toLocaleString()} ETB) was recorded under ${paymentMethod || "Cash"}.`,
+      type: "info",
+      referenceType: "expense",
+      referenceId: created.id,
+    })
+    .catch((err) => console.error("Error sending expense notification:", err.message));
+
+  return created;
 };
 
 
@@ -177,7 +191,22 @@ const updateExpense = async (id, data) => {
     ]
   );
 
-  return result.rows[0];
+  const updated = result.rows[0];
+
+  if (status && String(status).toLowerCase() === "paid" && updated) {
+    notificationsService
+      .createNotification({
+        targetRoles: ["admin", "manager", "finance"],
+        title: "Expense Marked as Paid",
+        message: `Expense #${updated.expense_number || updated.id} ("${updated.description}") was marked as Paid.`,
+        type: "success",
+        referenceType: "expense",
+        referenceId: updated.id,
+      })
+      .catch((err) => console.error("Error sending expense paid notification:", err.message));
+  }
+
+  return updated;
 };
 
 

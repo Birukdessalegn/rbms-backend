@@ -188,6 +188,15 @@ const initializeDatabase = async () => {
       END $$;
     `);
 
+    // Ensure customizable low_stock_threshold and out_of_stock_threshold columns
+    await pool.query(`
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold NUMERIC(12,2) DEFAULT 5;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS out_of_stock_threshold NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE department_inventory ADD COLUMN IF NOT EXISTS out_of_stock_threshold NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS received_at TIMESTAMP;
+      ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS receiving_notes TEXT;
+    `);
+
     console.log("✅ Database schema initialized");
   } catch (error) {
     console.error("❌ Failed to initialize database schema");

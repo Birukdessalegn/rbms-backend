@@ -96,7 +96,7 @@ const addVipDebt = async (customerId, amount) => {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, name, credit_limit, current_debt FROM vip_customers WHERE id = $1 AND is_active = TRUE`,
+    `SELECT id, name, tier, credit_limit, current_debt FROM vip_customers WHERE id = $1 AND is_active = TRUE`,
     [customerId]
   );
 
@@ -109,10 +109,14 @@ const addVipDebt = async (customerId, amount) => {
   const currentDebt = Number(customer.current_debt || 0);
   const availableBalance = creditLimit - currentDebt;
 
-  // Gold VIP or credit_limit <= 0 has UNLIMITED credit
+  // Gold VIP, Promoter VIP, or credit_limit <= 0 or >= 999999 has UNLIMITED credit / money
+  const tierLower = (customer.tier || "").toLowerCase();
   const isUnlimitedVip =
-    (customer.tier && customer.tier.toLowerCase().includes("gold")) ||
-    creditLimit <= 0;
+    tierLower.includes("gold") ||
+    tierLower.includes("promoter") ||
+    tierLower.includes("unlimited") ||
+    creditLimit <= 0 ||
+    creditLimit >= 999999;
 
   if (!isUnlimitedVip && availableBalance < spendAmt) {
     throw new Error(

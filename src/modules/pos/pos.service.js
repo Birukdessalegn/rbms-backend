@@ -917,7 +917,7 @@ const createOrder = async (order) => {
     // ============================================================
     for (const alert of deptLowStockAlerts) {
       notificationsService.createNotification({
-        targetRoles: ["admin", "manager"],
+        targetRoles: ["admin", "manager", "fb_controller", "storekeeper"],
         title: `${alert.department.toUpperCase()} Low Stock Alert`,
         message: `"${alert.productName}" in ${alert.department.toUpperCase()} is running low (${alert.remaining} remaining, minimum: ${alert.min}). F&B restock required!`,
         type: "warning",

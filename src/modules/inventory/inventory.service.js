@@ -549,30 +549,37 @@ const getMultiLocationInventory = async () => {
 
       -- Main Warehouse
       COALESCE(i.quantity, 0)::NUMERIC(12,2) AS main_quantity,
-      COALESCE(i.minimum_stock, 0)::NUMERIC(12,2) AS main_minimum_stock,
+      COALESCE(i.minimum_stock, p.low_stock_threshold, 10)::NUMERIC(12,2) AS main_minimum_stock,
+      COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS main_out_of_stock_threshold,
       CASE
-        WHEN COALESCE(i.quantity, 0) <= 0 THEN 'out_of_stock'
-        WHEN COALESCE(i.quantity, 0) <= COALESCE(i.minimum_stock, 0) THEN 'low_stock'
+        WHEN COALESCE(i.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0) THEN 'out_of_stock'
+        WHEN COALESCE(i.quantity, 0) <= COALESCE(i.minimum_stock, p.low_stock_threshold, 10) THEN 'low_stock'
         ELSE 'in_stock'
       END AS main_status,
 
       -- Bar Stock
       COALESCE(b.quantity, 0)::NUMERIC(12,2) AS bar_quantity,
-      COALESCE(b.minimum_stock, 5)::NUMERIC(12,2) AS bar_minimum_stock,
+      COALESCE(b.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2) AS bar_minimum_stock,
+      COALESCE(b.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS bar_out_of_stock_threshold,
       CASE
-        WHEN COALESCE(b.quantity, 0) <= 0 THEN 'out_of_stock'
-        WHEN COALESCE(b.quantity, 0) <= COALESCE(b.minimum_stock, 5) THEN 'low_stock'
+        WHEN COALESCE(b.quantity, 0) <= COALESCE(b.out_of_stock_threshold, p.out_of_stock_threshold, 0) THEN 'out_of_stock'
+        WHEN COALESCE(b.quantity, 0) <= COALESCE(b.minimum_stock, p.low_stock_threshold, 5) THEN 'low_stock'
         ELSE 'in_stock'
       END AS bar_status,
 
       -- Kitchen Stock
       COALESCE(k.quantity, 0)::NUMERIC(12,2) AS kitchen_quantity,
-      COALESCE(k.minimum_stock, 5)::NUMERIC(12,2) AS kitchen_minimum_stock,
+      COALESCE(k.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2) AS kitchen_minimum_stock,
+      COALESCE(k.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS kitchen_out_of_stock_threshold,
       CASE
-        WHEN COALESCE(k.quantity, 0) <= 0 THEN 'out_of_stock'
-        WHEN COALESCE(k.quantity, 0) <= COALESCE(k.minimum_stock, 5) THEN 'low_stock'
+        WHEN COALESCE(k.quantity, 0) <= COALESCE(k.out_of_stock_threshold, p.out_of_stock_threshold, 0) THEN 'out_of_stock'
+        WHEN COALESCE(k.quantity, 0) <= COALESCE(k.minimum_stock, p.low_stock_threshold, 5) THEN 'low_stock'
         ELSE 'in_stock'
       END AS kitchen_status,
+
+      -- Product Default Thresholds
+      COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
+      COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
 
       -- Total on-hand across all stores
       (COALESCE(i.quantity, 0) + COALESCE(b.quantity, 0) + COALESCE(k.quantity, 0))::NUMERIC(12,2) AS total_quantity,
@@ -607,34 +614,104 @@ const getMultiLocationInventory = async () => {
 };
 
 // ============================================================
-// UPDATE DEPARTMENT STOCK SETTINGS (MIN/MAX STOCK)
+// UPDATE DEPARTMENT / STORE STOCK SETTINGS (MIN/MAX/OUT-OF-STOCK)
 // ============================================================
 
 const updateDepartmentStockSettings = async (department, productId, data) => {
-  const { minimumStock, maximumStock } = data;
-  const dept = (department || "").toLowerCase();
+  const { minimumStock, maximumStock, outOfStockThreshold } = data;
+  const dept = (department || "all").toLowerCase();
 
-  const result = await pool.query(
-    `
-    INSERT INTO department_inventory (
-      department,
-      product_id,
-      minimum_stock,
-      maximum_stock,
-      updated_at
-    )
-    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-    ON CONFLICT (department, product_id)
-    DO UPDATE SET
-      minimum_stock = COALESCE($3, department_inventory.minimum_stock),
-      maximum_stock = COALESCE($4, department_inventory.maximum_stock),
-      updated_at = CURRENT_TIMESTAMP
-    RETURNING *
-    `,
-    [dept, productId, minimumStock, maximumStock || null]
-  );
+  const minVal = minimumStock !== undefined && minimumStock !== null && minimumStock !== "" ? Number(minimumStock) : null;
+  const maxVal = maximumStock !== undefined && maximumStock !== null && maximumStock !== "" ? Number(maximumStock) : null;
+  const outVal = outOfStockThreshold !== undefined && outOfStockThreshold !== null && outOfStockThreshold !== "" ? Number(outOfStockThreshold) : 0;
 
-  return result.rows[0];
+  // 1. Update Product defaults if provided
+  if (minVal !== null || outVal !== null) {
+    await pool.query(
+      `
+      UPDATE products
+      SET
+        low_stock_threshold = COALESCE($2, low_stock_threshold),
+        out_of_stock_threshold = COALESCE($3, out_of_stock_threshold),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [productId, minVal, outVal]
+    );
+  }
+
+  // 2. Department-specific or All stores update
+  if (dept === "all") {
+    // Update Central Warehouse
+    await pool.query(
+      `
+      INSERT INTO inventory (product_id, minimum_stock, maximum_stock, updated_at)
+      VALUES ($1, COALESCE($2, 10), $3, CURRENT_TIMESTAMP)
+      ON CONFLICT (product_id)
+      DO UPDATE SET
+        minimum_stock = COALESCE($2, inventory.minimum_stock),
+        maximum_stock = COALESCE($3, inventory.maximum_stock),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [productId, minVal, maxVal]
+    );
+
+    // Update both Bar & Kitchen
+    for (const d of ["bar", "kitchen"]) {
+      await pool.query(
+        `
+        INSERT INTO department_inventory (
+          department, product_id, minimum_stock, maximum_stock, out_of_stock_threshold, updated_at
+        )
+        VALUES ($1, $2, COALESCE($3, 5), $4, COALESCE($5, 0), CURRENT_TIMESTAMP)
+        ON CONFLICT (department, product_id)
+        DO UPDATE SET
+          minimum_stock = COALESCE($3, department_inventory.minimum_stock),
+          maximum_stock = COALESCE($4, department_inventory.maximum_stock),
+          out_of_stock_threshold = COALESCE($5, department_inventory.out_of_stock_threshold),
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [d, productId, minVal, maxVal, outVal]
+      );
+    }
+  } else if (dept === "main" || dept === "warehouse") {
+    await pool.query(
+      `
+      INSERT INTO inventory (product_id, minimum_stock, maximum_stock, updated_at)
+      VALUES ($1, COALESCE($2, 10), $3, CURRENT_TIMESTAMP)
+      ON CONFLICT (product_id)
+      DO UPDATE SET
+        minimum_stock = COALESCE($2, inventory.minimum_stock),
+        maximum_stock = COALESCE($3, inventory.maximum_stock),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [productId, minVal, maxVal]
+    );
+  } else {
+    // Bar or Kitchen
+    await pool.query(
+      `
+      INSERT INTO department_inventory (
+        department,
+        product_id,
+        minimum_stock,
+        maximum_stock,
+        out_of_stock_threshold,
+        updated_at
+      )
+      VALUES ($1, $2, COALESCE($3, 5), $4, COALESCE($5, 0), CURRENT_TIMESTAMP)
+      ON CONFLICT (department, product_id)
+      DO UPDATE SET
+        minimum_stock = COALESCE($3, department_inventory.minimum_stock),
+        maximum_stock = COALESCE($4, department_inventory.maximum_stock),
+        out_of_stock_threshold = COALESCE($5, department_inventory.out_of_stock_threshold),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [dept, productId, minVal, maxVal, outVal]
+    );
+  }
+
+  return { success: true, department: dept, productId, minimumStock: minVal, outOfStockThreshold: outVal };
 };
 
 module.exports = {

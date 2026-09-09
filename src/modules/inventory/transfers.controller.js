@@ -221,11 +221,41 @@ const rejectTransfer = async (req, res) => {
   }
 };
 
+// ============================================================
+// RECEIVE TRANSFER (CONFIRM RECEIPT AT BAR / KITCHEN)
+// ============================================================
+
+const receiveTransfer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { receivingNotes, notes } = req.body;
+    const userId = req.user?.id || null;
+
+    const transfer = await transfersService.receiveTransfer(id, {
+      userId,
+      receivingNotes: receivingNotes || notes || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Stock transfer received and verified successfully. Items added to ${transfer.to_location.toUpperCase()} stock.`,
+      data: transfer,
+    });
+  } catch (error) {
+    console.error("RECEIVE TRANSFER ERROR:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to confirm stock receipt",
+    });
+  }
+};
+
 module.exports = {
   createTransfer,
   requestTransfer,
   approveTransfer,
   rejectTransfer,
+  receiveTransfer,
   getTransfers,
   getTransferById,
 };

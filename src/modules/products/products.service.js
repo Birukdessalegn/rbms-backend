@@ -28,7 +28,51 @@ const getAllProducts = async () => {
 
       pc.id AS category_id,
       pc.name AS category_name,
-      pc.type AS category_type
+      pc.type AS category_type,
+
+      -- Real-time Department & Warehouse stock
+      COALESCE(b.quantity, 0)::NUMERIC(12,2) AS bar_stock,
+      COALESCE(b.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2) AS bar_min_stock,
+      COALESCE(b.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS bar_out_of_stock_threshold,
+      COALESCE(k.quantity, 0)::NUMERIC(12,2) AS kitchen_stock,
+      COALESCE(k.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2) AS kitchen_min_stock,
+      COALESCE(k.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS kitchen_out_of_stock_threshold,
+      COALESCE(i.quantity, 0)::NUMERIC(12,2) AS main_stock,
+      COALESCE(i.minimum_stock, p.low_stock_threshold, 0)::NUMERIC(12,2) AS main_min_stock,
+
+      -- Product Default Thresholds
+      COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
+      COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
+
+      -- Department-resolved current stock
+      CASE
+        WHEN p.portion_ratio > 0 AND LOWER(COALESCE(pc.type, '')) IN ('beverage', 'bar')
+          THEN FLOOR(COALESCE(b.quantity, 0) / p.portion_ratio)::NUMERIC(12,2)
+        WHEN LOWER(COALESCE(pc.type, '')) = 'food' THEN COALESCE(k.quantity, 0)::NUMERIC(12,2)
+        WHEN LOWER(COALESCE(pc.type, '')) IN ('beverage', 'bar') THEN COALESCE(b.quantity, 0)::NUMERIC(12,2)
+        ELSE (COALESCE(b.quantity, 0) + COALESCE(k.quantity, 0) + COALESCE(i.quantity, 0))::NUMERIC(12,2)
+      END AS current_stock,
+
+      -- Department-resolved minimum stock
+      CASE
+        WHEN LOWER(COALESCE(pc.type, '')) = 'food' THEN COALESCE(k.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2)
+        WHEN LOWER(COALESCE(pc.type, '')) IN ('beverage', 'bar') THEN COALESCE(b.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2)
+        ELSE COALESCE(i.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2)
+      END AS minimum_stock,
+
+      -- Department-resolved out of stock threshold
+      CASE
+        WHEN LOWER(COALESCE(pc.type, '')) = 'food' THEN COALESCE(k.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2)
+        WHEN LOWER(COALESCE(pc.type, '')) IN ('beverage', 'bar') THEN COALESCE(b.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2)
+        ELSE COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2)
+      END AS out_of_stock_threshold_resolved,
+
+      -- Department name
+      CASE
+        WHEN LOWER(COALESCE(pc.type, '')) = 'food' THEN 'Kitchen'
+        WHEN LOWER(COALESCE(pc.type, '')) IN ('beverage', 'bar') THEN 'Bar'
+        ELSE 'Store'
+      END AS stock_department
 
     FROM products p
 
@@ -37,6 +81,15 @@ const getAllProducts = async () => {
 
     LEFT JOIN products parent_p
       ON p.parent_product_id = parent_p.id
+
+    LEFT JOIN department_inventory b
+      ON COALESCE(p.parent_product_id, p.id) = b.product_id AND b.department = 'bar'
+
+    LEFT JOIN department_inventory k
+      ON COALESCE(p.parent_product_id, p.id) = k.product_id AND k.department = 'kitchen'
+
+    LEFT JOIN inventory i
+      ON COALESCE(p.parent_product_id, p.id) = i.product_id
 
     ORDER BY p.created_at DESC
   `);
@@ -68,6 +121,8 @@ const getProductById = async (id) => {
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
+      COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
       parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
@@ -112,6 +167,8 @@ const createProduct = async (data) => {
     parentProductId,
     portionRatio,
     servingSize,
+    lowStockThreshold,
+    outOfStockThreshold,
   } = data;
 
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
@@ -137,7 +194,9 @@ const createProduct = async (data) => {
       portion_ratio,
       serving_size,
       shots_capacity,
-      is_shot_item
+      is_shot_item,
+      low_stock_threshold,
+      out_of_stock_threshold
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -150,7 +209,9 @@ const createProduct = async (data) => {
       COALESCE($15, 1.0000),
       COALESCE($16, 'unit'),
       COALESCE($17, 30),
-      COALESCE($18, FALSE)
+      COALESCE($18, FALSE),
+      COALESCE($19, 5),
+      COALESCE($20, 0)
     )
     RETURNING *
     `,
@@ -173,6 +234,8 @@ const createProduct = async (data) => {
       servingSize || "unit",
       shotsCapacity !== undefined && shotsCapacity !== null && shotsCapacity !== "" ? parseInt(shotsCapacity, 10) : 30,
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : false,
+      lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : 5,
+      outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : 0,
     ]
   );
 
@@ -199,6 +262,8 @@ const updateProduct = async (id, data) => {
     parentProductId,
     portionRatio,
     servingSize,
+    lowStockThreshold,
+    outOfStockThreshold,
   } = data;
 
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
@@ -226,8 +291,10 @@ const updateProduct = async (id, data) => {
       serving_size = COALESCE($16, serving_size),
       shots_capacity = COALESCE($17, shots_capacity),
       is_shot_item = COALESCE($18, is_shot_item),
+      low_stock_threshold = COALESCE($19, low_stock_threshold),
+      out_of_stock_threshold = COALESCE($20, out_of_stock_threshold),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $19
+    WHERE id = $21
     RETURNING *
     `,
     [
@@ -249,6 +316,8 @@ const updateProduct = async (id, data) => {
       servingSize !== undefined ? servingSize : null,
       shotsCapacity !== undefined && shotsCapacity !== null && shotsCapacity !== "" ? parseInt(shotsCapacity, 10) : null,
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : null,
+      lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : null,
+      outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : null,
       id,
     ]
   );

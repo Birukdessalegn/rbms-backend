@@ -38,6 +38,7 @@ router.get("/transfers", transfersController.getTransfers);
 router.get("/transfers/:id", transfersController.getTransferById);
 router.put("/transfers/:id/approve", optionalAuth, transfersController.approveTransfer);
 router.put("/transfers/:id/reject", optionalAuth, transfersController.rejectTransfer);
+router.put("/transfers/:id/receive", optionalAuth, transfersController.receiveTransfer);
 
 // ============================================================
 // CENTRAL / MAIN INVENTORY

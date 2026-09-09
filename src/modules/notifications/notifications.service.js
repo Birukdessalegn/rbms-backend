@@ -6,7 +6,7 @@ const pool = require("../../config/database");
 
 const createNotification = async ({
   userId,
-  targetRoles = ["admin", "manager"],
+  targetRoles = ["admin", "manager", "fb_controller", "storekeeper"],
   title,
   message,
   type = "info",

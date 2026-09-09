@@ -18,6 +18,7 @@ const createTransfer = async ({
   items,
   notes,
   userId,
+  autoReceive = false,
 }) => {
   if (!toLocation || !["bar", "kitchen"].includes(toLocation.toLowerCase())) {
     throw new Error("Invalid destination location. Must be 'bar' or 'kitchen'.");
@@ -33,6 +34,7 @@ const createTransfer = async ({
     await client.query("BEGIN");
 
     const transferNumber = generateTransferNumber();
+    const initialStatus = autoReceive ? "completed" : "dispatched";
 
     // 1. Create transfer record
     const transferResult = await client.query(
@@ -43,16 +45,23 @@ const createTransfer = async ({
         to_location,
         status,
         dispatched_by,
+        received_by,
+        received_at,
+        receiving_notes,
         notes
       )
-      VALUES ($1, $2, $3, 'completed', $4, $5)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
       `,
       [
         transferNumber,
         fromLocation.toLowerCase(),
         toLocation.toLowerCase(),
+        initialStatus,
         userId || null,
+        autoReceive ? userId || null : null,
+        autoReceive ? new Date() : null,
+        autoReceive ? "Instantly confirmed upon dispatch" : null,
         notes || null,
       ]
     );
@@ -152,54 +161,55 @@ const createTransfer = async ({
         }
       }
 
-      // Add to Department Inventory (Bar or Kitchen)
-      await client.query(
-        `
-        INSERT INTO department_inventory (
-          department,
-          product_id,
-          quantity,
-          unit,
-          updated_at
-        )
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-        ON CONFLICT (department, product_id)
-        DO UPDATE SET
-          quantity = department_inventory.quantity + EXCLUDED.quantity,
-          updated_at = CURRENT_TIMESTAMP
-        `,
-        [
-          toLocation.toLowerCase(),
-          productId,
-          quantity,
-          product.unit || "pcs",
-        ]
-      );
+      // If auto-received, credit department immediately
+      if (autoReceive) {
+        await client.query(
+          `
+          INSERT INTO department_inventory (
+            department,
+            product_id,
+            quantity,
+            unit,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          ON CONFLICT (department, product_id)
+          DO UPDATE SET
+            quantity = department_inventory.quantity + EXCLUDED.quantity,
+            updated_at = CURRENT_TIMESTAMP
+          `,
+          [
+            toLocation.toLowerCase(),
+            productId,
+            quantity,
+            product.unit || "pcs",
+          ]
+        );
 
-      // Record department inventory transaction
-      await client.query(
-        `
-        INSERT INTO department_inventory_transactions (
-          department,
-          product_id,
-          transaction_type,
-          quantity,
-          reference_type,
-          reference_id,
-          notes,
-          created_by
-        )
-        VALUES ($1, $2, 'transfer_in', $3, 'transfer', $4, $5, $6)
-        `,
-        [
-          toLocation.toLowerCase(),
-          productId,
-          quantity,
-          transfer.id,
-          `Received from ${fromLocation.toUpperCase()} (${transferNumber})`,
-          userId || null,
-        ]
-      );
+        await client.query(
+          `
+          INSERT INTO department_inventory_transactions (
+            department,
+            product_id,
+            transaction_type,
+            quantity,
+            reference_type,
+            reference_id,
+            notes,
+            created_by
+          )
+          VALUES ($1, $2, 'transfer_in', $3, 'transfer', $4, $5, $6)
+          `,
+          [
+            toLocation.toLowerCase(),
+            productId,
+            quantity,
+            transfer.id,
+            `Received from ${fromLocation.toUpperCase()} (${transferNumber})`,
+            userId || null,
+          ]
+        );
+      }
 
       // Insert transfer item
       await client.query(
@@ -218,17 +228,17 @@ const createTransfer = async ({
 
     await client.query("COMMIT");
 
-    // Notifications outside transaction block
-    // 1. Transfer completed notification
+    // Notifications
     await notificationsService.createNotification({
-      title: "Stock Transfer Dispatched",
-      message: `Transfer ${transferNumber}: ${items.length} items transferred from ${fromLocation.toUpperCase()} to ${toLocation.toUpperCase()}.`,
+      title: autoReceive ? "Stock Transfer Completed" : "Incoming Stock Delivery Dispatched",
+      message: `Transfer ${transferNumber}: ${items.length} items dispatched to ${toLocation.toUpperCase()}.${
+        autoReceive ? " Stock accepted." : " Awaiting physical count and receipt at " + toLocation.toUpperCase() + "."
+      }`,
       type: "info",
       referenceType: "transfer",
       referenceId: transfer.id,
     });
 
-    // 2. Central low stock warnings
     for (const alert of lowStockAlerts) {
       await notificationsService.createNotification({
         title: "Central Store Low Stock Alert",
@@ -348,6 +358,8 @@ const getTransferById = async (id) => {
       st.to_location,
       st.status,
       st.notes,
+      st.received_at,
+      st.receiving_notes,
       st.created_at,
       st.updated_at,
       u_req.username AS requested_by_username,
@@ -405,10 +417,13 @@ const getTransfers = async ({ status, toLocation, fromLocation, limit = 50 } = {
       st.to_location,
       st.status,
       st.notes,
+      st.received_at,
+      st.receiving_notes,
       st.created_at,
       st.updated_at,
       u_disp.username AS dispatched_by_username,
       u_req.username AS requested_by_username,
+      u_rec.username AS received_by_username,
       (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id) AS total_items,
       (SELECT COALESCE(SUM(quantity), 0) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id) AS total_quantity,
       (
@@ -426,6 +441,7 @@ const getTransfers = async ({ status, toLocation, fromLocation, limit = 50 } = {
     FROM stock_transfers st
     LEFT JOIN users u_disp ON st.dispatched_by = u_disp.id
     LEFT JOIN users u_req ON st.requested_by = u_req.id
+    LEFT JOIN users u_rec ON st.received_by = u_rec.id
     WHERE 1=1
   `;
   const params = [];
@@ -454,6 +470,143 @@ const getTransfers = async ({ status, toLocation, fromLocation, limit = 50 } = {
 
   const result = await pool.query(query, params);
   return result.rows;
+};
+
+// ============================================================
+// RECEIVE TRANSFER (BAR / KITCHEN STAFF PHYSICAL ACCEPTANCE)
+// ============================================================
+
+const receiveTransfer = async (id, { userId, receivingNotes } = {}) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const transferRes = await client.query(
+      `SELECT * FROM stock_transfers WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+
+    if (transferRes.rows.length === 0) {
+      throw new Error(`Transfer #${id} not found.`);
+    }
+
+    const transfer = transferRes.rows[0];
+
+    if (transfer.status === "completed") {
+      throw new Error(`Transfer ${transfer.transfer_number} has already been accepted and completed.`);
+    }
+
+    if (transfer.status === "cancelled") {
+      throw new Error(`Cannot receive cancelled transfer ${transfer.transfer_number}.`);
+    }
+
+    const itemsRes = await client.query(
+      `SELECT sti.*, p.name AS product_name, p.unit
+       FROM stock_transfer_items sti
+       JOIN products p ON sti.product_id = p.id
+       WHERE sti.transfer_id = $1`,
+      [id]
+    );
+
+    const items = itemsRes.rows;
+    if (items.length === 0) {
+      throw new Error("No items found in this transfer.");
+    }
+
+    // Credit destination department inventory
+    for (const item of items) {
+      const productId = item.product_id;
+      const quantity = Number(item.quantity);
+
+      await client.query(
+        `
+        INSERT INTO department_inventory (
+          department,
+          product_id,
+          quantity,
+          unit,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        ON CONFLICT (department, product_id)
+        DO UPDATE SET
+          quantity = department_inventory.quantity + EXCLUDED.quantity,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          transfer.to_location.toLowerCase(),
+          productId,
+          quantity,
+          item.unit || "pcs",
+        ]
+      );
+
+      // Record department inventory transaction
+      await client.query(
+        `
+        INSERT INTO department_inventory_transactions (
+          department,
+          product_id,
+          transaction_type,
+          quantity,
+          reference_type,
+          reference_id,
+          notes,
+          created_by
+        )
+        VALUES ($1, $2, 'transfer_in', $3, 'transfer_received', $4, $5, $6)
+        `,
+        [
+          transfer.to_location.toLowerCase(),
+          productId,
+          quantity,
+          transfer.id,
+          `Received from ${transfer.from_location.toUpperCase()} (${transfer.transfer_number}). ${receivingNotes ? `Notes: ${receivingNotes}` : "Verified & counted."}`,
+          userId || null,
+        ]
+      );
+    }
+
+    // Mark transfer completed with receiving audit trail
+    await client.query(
+      `
+      UPDATE stock_transfers
+      SET status = 'completed',
+          received_by = $1,
+          received_at = CURRENT_TIMESTAMP,
+          receiving_notes = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      `,
+      [userId || null, receivingNotes || null, id]
+    );
+
+    await client.query("COMMIT");
+
+    // Fetch user name for clean notification
+    let receiverName = "Staff";
+    if (userId) {
+      const uRes = await pool.query(`SELECT username FROM users WHERE id = $1`, [userId]);
+      if (uRes.rows.length > 0) receiverName = uRes.rows[0].username;
+    }
+
+    // Send notifications to Storekeeper & Manager
+    await notificationsService.createNotification({
+      title: `Stock Delivery Accepted at ${transfer.to_location.toUpperCase()}`,
+      message: `Transfer ${transfer.transfer_number} (${items.length} items) was physically counted and confirmed by ${receiverName}.`,
+      type: "success",
+      referenceType: "transfer",
+      referenceId: transfer.id,
+    });
+
+    return getTransferById(id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 // ============================================================
@@ -494,7 +647,7 @@ const approveTransfer = async (id, { userId, notes } = {}) => {
       throw new Error("No items in this transfer.");
     }
 
-    // Process each item: deduct from main, add to kitchen/bar
+    // Deduct from main store
     for (const item of items) {
       const productId = item.product_id;
       const quantity = Number(item.quantity);
@@ -523,27 +676,12 @@ const approveTransfer = async (id, { userId, notes } = {}) => {
           [productId, quantity, transfer.id, `F&B Controller approved restock to ${transfer.to_location.toUpperCase()}`, userId || null]
         );
       }
-
-      // Add to department inventory
-      await client.query(
-        `INSERT INTO department_inventory (department, product_id, quantity, unit, updated_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (department, product_id)
-         DO UPDATE SET quantity = department_inventory.quantity + $3, updated_at = CURRENT_TIMESTAMP`,
-        [transfer.to_location, productId, quantity, item.unit || "pcs"]
-      );
-
-      await client.query(
-        `INSERT INTO department_inventory_transactions (department, product_id, transaction_type, quantity, reference_type, reference_id, notes, created_by)
-         VALUES ($1, $2, 'transfer_in', $3, 'transfer_approved', $4, $5, $6)`,
-        [transfer.to_location, productId, quantity, transfer.id, `Received from ${transfer.from_location.toUpperCase()} via F&B Controller approval`, userId || null]
-      );
     }
 
-    // Mark transfer as completed & approved
+    // Mark transfer as dispatched (awaiting physical confirmation at Bar/Kitchen)
     await client.query(
       `UPDATE stock_transfers
-       SET status = 'completed',
+       SET status = 'dispatched',
            approved_by = $1,
            approved_at = CURRENT_TIMESTAMP,
            dispatched_by = COALESCE(dispatched_by, $1),
@@ -594,6 +732,8 @@ module.exports = {
   requestTransfer,
   approveTransfer,
   rejectTransfer,
+  receiveTransfer,
   getTransferById,
   getTransfers,
 };
+

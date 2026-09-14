@@ -2,7 +2,14 @@ const notificationsService = require("./notifications.service");
 
 const getNotifications = async (req, res) => {
   try {
-    const userId = req.user?.id || null;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required to view notifications",
+      });
+    }
+
     const unreadOnly = req.query.unread === "true";
     const limit = parseInt(req.query.limit, 10) || 50;
 

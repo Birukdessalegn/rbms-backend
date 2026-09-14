@@ -77,6 +77,10 @@ const createNotification = async ({
 // ============================================================
 
 const getNotifications = async (userId, unreadOnly = false, limit = 50) => {
+  if (!userId) {
+    return [];
+  }
+
   let query = `
     SELECT
       n.id,
@@ -89,14 +93,9 @@ const getNotifications = async (userId, unreadOnly = false, limit = 50) => {
       n.is_read,
       n.created_at
     FROM notifications n
-    WHERE 1=1
+    WHERE n.user_id = $1
   `;
-  const params = [];
-
-  if (userId) {
-    params.push(userId);
-    query += ` AND n.user_id = $${params.length}`;
-  }
+  const params = [userId];
 
   if (unreadOnly) {
     query += ` AND n.is_read = FALSE`;

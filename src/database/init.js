@@ -49,6 +49,7 @@ const initializeDatabase = async () => {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS serving_size VARCHAR(50) DEFAULT 'unit';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS shots_capacity INTEGER DEFAULT 30;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_shot_item BOOLEAN DEFAULT FALSE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';
 
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(150);
       ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(12,2) DEFAULT 0.00;
@@ -212,6 +213,15 @@ const initializeDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- Ensure cPanel user ambbatxv has full rights if role exists
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ambbatxv') THEN
+          EXECUTE 'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ambbatxv';
+          EXECUTE 'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ambbatxv';
+        END IF;
+      END $$;
     `);
 
     console.log("✅ Database schema initialized");

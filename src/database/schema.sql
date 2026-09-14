@@ -383,6 +383,7 @@ CREATE TABLE IF NOT EXISTS products (
     serving_size VARCHAR(50) DEFAULT 'unit',
     shots_capacity INTEGER DEFAULT 30,
     is_shot_item BOOLEAN DEFAULT FALSE,
+    applicable_for VARCHAR(50) DEFAULT 'both',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

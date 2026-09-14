@@ -12,7 +12,12 @@ const startServer = async () => {
 
     console.log("✅ Database connection successful");
 
-    await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
+    try {
+      await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
+      console.log("✅ 'applicable_for' column verified in products table");
+    } catch (migErr) {
+      console.warn("⚠️ products.applicable_for migration notice:", migErr.message);
+    }
 
     await initializeDatabase();
 

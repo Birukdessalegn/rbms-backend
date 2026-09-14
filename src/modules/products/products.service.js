@@ -22,6 +22,7 @@ const getAllProducts = async () => {
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      COALESCE(p.applicable_for, 'both') AS applicable_for,
       parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
@@ -121,6 +122,7 @@ const getProductById = async (id) => {
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      COALESCE(p.applicable_for, 'both') AS applicable_for,
       COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
       COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
       parent_p.name AS parent_product_name,
@@ -169,8 +171,11 @@ const createProduct = async (data) => {
     servingSize,
     lowStockThreshold,
     outOfStockThreshold,
+    applicable_for,
+    applicableFor,
   } = data;
 
+  const resolvedApplicableFor = applicable_for || applicableFor || "both";
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
 
@@ -196,7 +201,8 @@ const createProduct = async (data) => {
       shots_capacity,
       is_shot_item,
       low_stock_threshold,
-      out_of_stock_threshold
+      out_of_stock_threshold,
+      applicable_for
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -211,7 +217,8 @@ const createProduct = async (data) => {
       COALESCE($17, 30),
       COALESCE($18, FALSE),
       COALESCE($19, 5),
-      COALESCE($20, 0)
+      COALESCE($20, 0),
+      COALESCE($21, 'both')
     )
     RETURNING *
     `,
@@ -236,6 +243,7 @@ const createProduct = async (data) => {
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : false,
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : 5,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : 0,
+      resolvedApplicableFor,
     ]
   );
 
@@ -264,7 +272,16 @@ const updateProduct = async (id, data) => {
     servingSize,
     lowStockThreshold,
     outOfStockThreshold,
+    applicable_for,
+    applicableFor,
   } = data;
+
+  const resolvedApplicableFor =
+    applicable_for !== undefined
+      ? applicable_for
+      : applicableFor !== undefined
+      ? applicableFor
+      : null;
 
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
@@ -293,8 +310,9 @@ const updateProduct = async (id, data) => {
       is_shot_item = COALESCE($18, is_shot_item),
       low_stock_threshold = COALESCE($19, low_stock_threshold),
       out_of_stock_threshold = COALESCE($20, out_of_stock_threshold),
+      applicable_for = COALESCE($21, applicable_for),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $21
+    WHERE id = $22
     RETURNING *
     `,
     [
@@ -318,6 +336,7 @@ const updateProduct = async (id, data) => {
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : null,
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : null,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : null,
+      resolvedApplicableFor,
       id,
     ]
   );
@@ -416,6 +435,7 @@ const getMenu = async (menuType) => {
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      COALESCE(p.applicable_for, 'both') AS applicable_for,
       p.created_at,
       p.updated_at,
 

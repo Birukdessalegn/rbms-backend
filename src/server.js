@@ -12,6 +12,8 @@ const startServer = async () => {
 
     console.log("✅ Database connection successful");
 
+    await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
+
     await initializeDatabase();
 
     // Bind to "0.0.0.0" so mobile devices on Wi-Fi can connect

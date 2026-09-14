@@ -72,12 +72,84 @@ app.use("/api/finance", financeRoutes);
 app.use("/api/vip-customers", vipCustomersRoutes);
 app.use("/api/notifications", notificationsRoutes);
 
+// Database pool for health check and diagnostics
+const pool = require("./config/database");
+
 // Test route
 app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "RBMS Backend is running 🚀",
   });
+});
+
+// Diagnostic & migration check route
+app.get("/api/db-diagnostics", async (req, res) => {
+  try {
+    const userRes = await pool.query("SELECT current_user, current_database()");
+    const ownerRes = await pool.query(
+      "SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'products'"
+    );
+
+    let alterResult = "Not attempted";
+    try {
+      await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
+      alterResult = "SUCCESS: Column added or verified!";
+    } catch (e) {
+      alterResult = "FAILED: " + e.message;
+    }
+
+    const colsRes = await pool.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'products'"
+    );
+
+    res.json({
+      connected_user: userRes.rows[0]?.current_user,
+      connected_database: userRes.rows[0]?.current_database,
+      products_owner: ownerRes.rows[0]?.tableowner,
+      alter_result: alterResult,
+      has_applicable_for: colsRes.rows.some((c) => c.column_name === "applicable_for"),
+      columns_count: colsRes.rows.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One-time route to fix table ownership and add column using rbms-user credentials
+app.get("/api/run-owner-fix", async (req, res) => {
+  const { Client } = require("pg");
+  const password = req.query.password || process.env.DB_PASSWORD;
+
+  const client = new Client({
+    host: process.env.DB_HOST || "localhost",
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || "rbms",
+    user: "rbms-user",
+    password: password,
+  });
+
+  try {
+    await client.connect();
+    await client.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
+    await client.query('REASSIGN OWNED BY "rbms-user" TO ambbatxv;');
+    await client.query("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ambbatxv;");
+    await client.query("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ambbatxv;");
+    await client.end();
+    res.json({
+      success: true,
+      message: "✅ SUCCESS: Column added AND ownership transferred to ambbatxv!",
+    });
+  } catch (err) {
+    try {
+      await client.end();
+    } catch (_) {}
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      hint: "Make sure you pass the rbms-user password in the query string: ?password=your_password",
+    });
+  }
 });
 
 module.exports = app;

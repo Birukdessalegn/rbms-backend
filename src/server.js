@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const app = require("./app");
 const pool = require("./config/database");
-const initializeDatabase = require("./database/init");
 
 const PORT = process.env.PORT || 8000;
 
@@ -11,15 +10,6 @@ const startServer = async () => {
     await pool.query("SELECT NOW()");
 
     console.log("✅ Database connection successful");
-
-    try {
-      await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';");
-      console.log("✅ 'applicable_for' column verified in products table");
-    } catch (migErr) {
-      console.warn("⚠️ products.applicable_for migration notice:", migErr.message);
-    }
-
-    await initializeDatabase();
 
     // Bind to "0.0.0.0" so mobile devices on Wi-Fi can connect
     app.listen(PORT, "0.0.0.0", () => {

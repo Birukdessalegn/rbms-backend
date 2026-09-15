@@ -2,6 +2,63 @@ const pool = require("../../config/database");
 const notificationsService = require("../notifications/notifications.service");
 
 // ============================================================
+// RESOLVE TARGET DEPARTMENT (KITCHEN vs BAR)
+// ============================================================
+const resolveTargetDepartment = (product) => {
+  if (!product) return null;
+  const categoryType = (product.category_type || "").toLowerCase().trim();
+  const categoryName = (product.category_name || "").toLowerCase().trim();
+  const productName = (product.name || "").toLowerCase().trim();
+
+  // Kitchen / Food Items (Ticket to Kitchen & deduct Kitchen stock)
+  if (
+    categoryType === "food" ||
+    categoryType === "kitchen" ||
+    categoryType === "fruit" ||
+    categoryName.includes("fruit") ||
+    categoryName.includes("food") ||
+    categoryName.includes("kitchen") ||
+    categoryName.includes("salad") ||
+    categoryName.includes("dessert") ||
+    categoryName.includes("appetizer") ||
+    categoryName.includes("bakery") ||
+    categoryName.includes("meal") ||
+    productName.includes("salad") ||
+    productName.includes("pizza") ||
+    productName.includes("burger") ||
+    productName.includes("fruit")
+  ) {
+    return "kitchen";
+  }
+
+  // Bar / Drink Items (Ticket to Bar & deduct Bar stock)
+  if (
+    categoryType === "bar" ||
+    categoryType === "beverage" ||
+    categoryType === "drink" ||
+    categoryName.includes("bar") ||
+    categoryName.includes("drink") ||
+    categoryName.includes("beverage") ||
+    categoryName.includes("wine") ||
+    categoryName.includes("beer") ||
+    categoryName.includes("cocktail") ||
+    categoryName.includes("liquor") ||
+    categoryName.includes("spirit") ||
+    categoryName.includes("whiskey") ||
+    categoryName.includes("vodka") ||
+    categoryName.includes("gin") ||
+    categoryName.includes("juice") ||
+    categoryName.includes("soda") ||
+    categoryName.includes("coffee") ||
+    categoryName.includes("tea")
+  ) {
+    return "bar";
+  }
+
+  return null;
+};
+
+// ============================================================
 // GET ALL POS ORDERS
 // ============================================================
 
@@ -610,20 +667,19 @@ const createOrder = async (order) => {
         // DETERMINE WHERE PRODUCT SHOULD GO
         // ========================================================
 
-        const categoryType = product.category_type?.toLowerCase();
-
+        const targetDepartment = resolveTargetDepartment(product);
 
         // Kitchen Products
-        if (categoryType === "food") {
+        if (targetDepartment === "kitchen") {
           kitchenItems.push(createdItem);
         }
         // Bar Products
-        else if (categoryType === "beverage" || categoryType === "bar") {
+        else if (targetDepartment === "bar") {
           barItems.push(createdItem);
         }
         else {
           console.log(
-            `Product "${product.name}" has category "${categoryType}" and will not be sent to kitchen or bar.`
+            `Product "${product.name}" (category: "${product.category_name || ""}", type: "${product.category_type || ""}") is not sent to kitchen or bar.`
           );
         }
 
@@ -631,12 +687,6 @@ const createOrder = async (order) => {
         // AUTOMATIC STOCK DEDUCTION FROM BAR / KITCHEN SUB-STORE
         // WITH PARENT-PRODUCT PORTION CONVERSION (SHOTS / HALF BOTTLE)
         // ========================================================
-        let targetDepartment = null;
-        if (categoryType === "food") {
-          targetDepartment = "kitchen";
-        } else if (categoryType === "beverage" || categoryType === "bar") {
-          targetDepartment = "bar";
-        }
 
         if (targetDepartment) {
           let stockProductId = product.id;
@@ -1546,7 +1596,7 @@ const addOrderItems = async (orderId, newItems = [], user = null) => {
         : parseInt(rawId, 10);
 
       const productResult = await client.query(
-        `SELECT p.*, pc.type AS category_type
+        `SELECT p.*, pc.type AS category_type, pc.name AS category_name
          FROM products p
          LEFT JOIN product_categories pc ON p.category_id = pc.id
          WHERE p.id = $1`,
@@ -1571,13 +1621,10 @@ const addOrderItems = async (orderId, newItems = [], user = null) => {
       );
       const createdItem = itemResult.rows[0];
 
-      const categoryType = product.category_type?.toLowerCase();
-      let targetDept = null;
-      if (categoryType === "food") {
-        targetDept = "kitchen";
+      const targetDept = resolveTargetDepartment(product);
+      if (targetDept === "kitchen") {
         kitchenItems.push(createdItem);
-      } else if (categoryType === "beverage" || categoryType === "bar") {
-        targetDept = "bar";
+      } else if (targetDept === "bar") {
         barItems.push(createdItem);
       }
 
@@ -1683,7 +1730,7 @@ const removeOrderItem = async (orderId, orderItemId, options = {}, user = null) 
 
     // Get product details to restore stock
     const prodRes = await client.query(
-      `SELECT p.*, pc.type AS category_type
+      `SELECT p.*, pc.type AS category_type, pc.name AS category_name
        FROM products p
        LEFT JOIN product_categories pc ON p.category_id = pc.id
        WHERE p.id = $1`,
@@ -1691,10 +1738,7 @@ const removeOrderItem = async (orderId, orderItemId, options = {}, user = null) 
     );
     if (prodRes.rows.length > 0) {
       const product = prodRes.rows[0];
-      const categoryType = product.category_type?.toLowerCase();
-      let targetDept = null;
-      if (categoryType === "food") targetDept = "kitchen";
-      else if (categoryType === "beverage" || categoryType === "bar") targetDept = "bar";
+      const targetDept = resolveTargetDepartment(product);
 
       await adjustDepartmentStock(
         client,
@@ -1769,7 +1813,7 @@ const updateOrderItem = async (orderId, orderItemId, updateData = {}, user = nul
     const diff = newQty - oldQty;
     if (diff !== 0) {
       const prodRes = await client.query(
-        `SELECT p.*, pc.type AS category_type
+        `SELECT p.*, pc.type AS category_type, pc.name AS category_name
          FROM products p
          LEFT JOIN product_categories pc ON p.category_id = pc.id
          WHERE p.id = $1`,
@@ -1777,10 +1821,7 @@ const updateOrderItem = async (orderId, orderItemId, updateData = {}, user = nul
       );
       if (prodRes.rows.length > 0) {
         const product = prodRes.rows[0];
-        const categoryType = product.category_type?.toLowerCase();
-        let targetDept = null;
-        if (categoryType === "food") targetDept = "kitchen";
-        else if (categoryType === "beverage" || categoryType === "bar") targetDept = "bar";
+        const targetDept = resolveTargetDepartment(product);
 
         if (diff > 0) {
           await adjustDepartmentStock(

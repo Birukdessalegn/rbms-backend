@@ -179,6 +179,53 @@ const createProduct = async (data) => {
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
 
+  let resolvedProductCode = (productCode || data.product_code || "").trim();
+
+  // If no product code provided, auto-generate sequential code by category
+  if (!resolvedProductCode && (categoryId || data.category_id)) {
+    const targetCatId = categoryId || data.category_id;
+    try {
+      const catRes = await pool.query(
+        `SELECT name, type FROM product_categories WHERE id = $1`,
+        [targetCatId]
+      );
+      const catName = (catRes.rows[0]?.name || "").toUpperCase();
+      const catType = (catRes.rows[0]?.type || "").toUpperCase();
+
+      let prefix = "PRD";
+      if (catName.includes("FRUIT")) prefix = "FR";
+      else if (catName.includes("FOOD")) prefix = "FD";
+      else if (catName.includes("BEVERAGE") || catName.includes("SOFT")) prefix = "BV";
+      else if (catName.includes("BAR") || catName.includes("LIQUOR") || catName.includes("SPIRIT")) prefix = "BR";
+      else if (catName.includes("SUPPL") || catName.includes("KITCHEN")) prefix = "KS";
+      else if (catName.includes("DESSERT")) prefix = "DS";
+      else if (catName.includes("SALAD")) prefix = "SL";
+      else if (catType === "FOOD") prefix = "FD";
+      else if (catType === "BAR") prefix = "BR";
+      else if (catType === "BEVERAGE") prefix = "BV";
+      else if (catType === "SUPPLY") prefix = "KS";
+      else {
+        const clean = catName.replace(/[^A-Z0-9]/g, "");
+        prefix = clean.slice(0, 3) || "PRD";
+      }
+
+      const codeRes = await pool.query(
+        `SELECT product_code FROM products WHERE product_code LIKE $1`,
+        [`${prefix}-%`]
+      );
+
+      let maxNum = 0;
+      for (const row of codeRes.rows) {
+        const num = parseInt((row.product_code || "").replace(`${prefix}-`, ""), 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+
+      resolvedProductCode = `${prefix}-${String(maxNum + 1).padStart(3, "0")}`;
+    } catch (e) {
+      console.warn("Auto product code generation fallback:", e);
+    }
+  }
+
   const result = await pool.query(
     `
     INSERT INTO products (
@@ -223,7 +270,7 @@ const createProduct = async (data) => {
     RETURNING *
     `,
     [
-      productCode || null,
+      resolvedProductCode || null,
       name,
       categoryId || null,
       description || null,

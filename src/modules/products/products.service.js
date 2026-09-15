@@ -1,8 +1,16 @@
 const pool = require("../../config/database");
 
-// Get all products
-const getAllProducts = async () => {
-  const result = await pool.query(`
+const ensureProductsColumns = async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS tags VARCHAR(255) DEFAULT '';
+    `);
+  } catch (migErr) {
+    console.warn("⚠️ products.service auto-migration notice:", migErr.message);
+  }
+};
+
+const ALL_PRODUCTS_QUERY = `
     SELECT
       p.id,
       p.product_code,
@@ -94,16 +102,24 @@ const getAllProducts = async () => {
       ON COALESCE(p.parent_product_id, p.id) = i.product_id
 
     ORDER BY p.created_at DESC
-  `);
+`;
 
-  return result.rows;
+// Get all products
+const getAllProducts = async () => {
+  try {
+    const result = await pool.query(ALL_PRODUCTS_QUERY);
+    return result.rows;
+  } catch (err) {
+    if (err.code === "42703") {
+      await ensureProductsColumns();
+      const retryResult = await pool.query(ALL_PRODUCTS_QUERY);
+      return retryResult.rows;
+    }
+    throw err;
+  }
 };
 
-
-// Get product by ID
-const getProductById = async (id) => {
-  const result = await pool.query(
-    `
+const GET_PRODUCT_BY_ID_QUERY = `
     SELECT
       p.id,
       p.product_code,
@@ -144,11 +160,21 @@ const getProductById = async (id) => {
       ON p.parent_product_id = parent_p.id
 
     WHERE p.id = $1
-    `,
-    [id]
-  );
+`;
 
-  return result.rows[0];
+// Get product by ID
+const getProductById = async (id) => {
+  try {
+    const result = await pool.query(GET_PRODUCT_BY_ID_QUERY, [id]);
+    return result.rows[0];
+  } catch (err) {
+    if (err.code === "42703") {
+      await ensureProductsColumns();
+      const retryResult = await pool.query(GET_PRODUCT_BY_ID_QUERY, [id]);
+      return retryResult.rows[0];
+    }
+    throw err;
+  }
 };
 
 

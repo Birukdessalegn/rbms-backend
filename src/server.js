@@ -11,6 +11,16 @@ const startServer = async () => {
 
     console.log("✅ Database connection successful");
 
+    // Auto-migrate tags column idempotently
+    try {
+      await pool.query(`
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS tags VARCHAR(255) DEFAULT '';
+      `);
+      console.log("✅ Database schema sync & migrations verified");
+    } catch (migErr) {
+      console.warn("⚠️ Database auto-migration check notice:", migErr.message);
+    }
+
     // Bind to "0.0.0.0" so mobile devices on Wi-Fi can connect
     app.listen(PORT, "0.0.0.0", () => {
       console.log(

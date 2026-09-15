@@ -183,9 +183,10 @@ const createPayment = async (req, res) => {
     }
 
     const targetVipId = vipCustomerId || customerId;
+    let updatedVipCustomer = null;
     // If paying with VIP credit, deduct from their VIP balance
     if ((paymentMethod === "credit" || paymentMethod === "vip") && targetVipId) {
-      await vipCustomersService.addVipDebt(targetVipId, amount);
+      updatedVipCustomer = await vipCustomersService.addVipDebt(targetVipId, amount);
     }
 
     const orderId = req.params.id || req.params.orderId;
@@ -205,6 +206,7 @@ const createPayment = async (req, res) => {
       total_paid: result.totalPaid,
       remaining_balance: result.remainingBalance,
       is_fully_paid: result.isFullyPaid,
+      vip_customer: updatedVipCustomer,
     });
   } catch (error) {
     console.error("Create payment error:", error);

@@ -160,6 +160,27 @@ const createAttendance = async (req, res) => {
   }
 };
 
+// POST /api/attendance/auto-mark
+const triggerAutoMark = async (req, res) => {
+  try {
+    const { targetDate } = req.body || {};
+    const result = await attendanceService.autoMarkDailyAbsentees(targetDate || null);
+
+    res.json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Trigger auto-mark error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to run auto-mark for attendance",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAttendance,
   getTodayAttendance,
@@ -167,4 +188,5 @@ module.exports = {
   checkIn,
   checkOut,
   createAttendance,
+  triggerAutoMark,
 };

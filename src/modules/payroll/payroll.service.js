@@ -63,6 +63,10 @@ const getPayrollSummary = async (periodMonth) => {
         e.employee_code,
         e.first_name,
         e.last_name,
+        e.hire_date,
+        e.shift_start_time,
+        e.shift_end_time,
+        e.work_hours,
         d.name AS department_name,
         r.name AS position_title
       FROM payroll_items pi
@@ -92,13 +96,24 @@ const getPayrollSummary = async (periodMonth) => {
       net_salary: Number(it.net_salary || 0)
     }));
   } else {
+    // Parse period year and month to determine days in month for proration
+    const [yearStr, monthStr] = currentMonth.split("-");
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    const totalDaysInMonth = new Date(year, month, 0).getDate();
+
     // Compute dynamic live preview from employee salaries and attendance
+    // Strictly starts from hire_date (ignores prior days and excludes future hires)
     const employeesQuery = `
       SELECT 
         e.id AS employee_id,
         e.employee_code,
         e.first_name,
         e.last_name,
+        e.hire_date,
+        e.shift_start_time,
+        e.shift_end_time,
+        e.work_hours,
         COALESCE(e.salary, 0) AS base_salary,
         d.name AS department_name,
         r.name AS position_title,
@@ -109,34 +124,54 @@ const getPayrollSummary = async (periodMonth) => {
       LEFT JOIN roles r ON e.role_id = r.id
       LEFT JOIN (
         SELECT 
-          employee_id,
-          COUNT(CASE WHEN status::text IN ('present', 'late') THEN 1 END) AS days_present,
-          COUNT(CASE WHEN status::text = 'absent' THEN 1 END) AS days_absent
-        FROM attendance
-        WHERE TO_CHAR(attendance_date, 'YYYY-MM') = $1
-        GROUP BY employee_id
+          a.employee_id,
+          COUNT(CASE WHEN a.status::text IN ('present', 'late') THEN 1 END) AS days_present,
+          COUNT(CASE WHEN a.status::text = 'absent' THEN 1 END) AS days_absent
+        FROM attendance a
+        JOIN employees emp ON a.employee_id = emp.id
+        WHERE TO_CHAR(a.attendance_date, 'YYYY-MM') = $1
+          AND (emp.hire_date IS NULL OR a.attendance_date >= emp.hire_date)
+        GROUP BY a.employee_id
       ) att ON e.id = att.employee_id
       WHERE e.status = 'active'
+        AND (e.hire_date IS NULL OR TO_CHAR(e.hire_date, 'YYYY-MM') <= $1)
       ORDER BY e.first_name ASC
     `;
     const { rows } = await pool.query(employeesQuery, [currentMonth]);
 
     items = rows.map((emp) => {
-      const baseSalary = Number(emp.base_salary || 0);
+      const fullBaseSalary = Number(emp.base_salary || 0);
       const allowances = 0.00;
       const overtime = 0.00;
       const bonuses = 0.00;
 
-      // 1. Gross Salary = Base + Allowances + Overtime + Bonuses
-      const grossSalary = Number((baseSalary + allowances + overtime + bonuses).toFixed(2));
+      // Handle hire date proration for employees who joined mid-month
+      let isProrated = false;
+      let activeDaysInMonth = totalDaysInMonth;
+      let effectiveBaseSalary = fullBaseSalary;
 
-      // 2. Absence Deductions = (Days Absent * (Base Salary / 30))
+      if (emp.hire_date) {
+        const hireDateStr = new Date(emp.hire_date).toISOString().slice(0, 10);
+        if (hireDateStr.startsWith(currentMonth)) {
+          const hireDay = parseInt(hireDateStr.slice(8, 10), 10);
+          activeDaysInMonth = Math.max(1, totalDaysInMonth - hireDay + 1);
+          isProrated = true;
+          // Base salary prorated by active days in 30-day statutory month
+          effectiveBaseSalary = Number(((fullBaseSalary / 30) * activeDaysInMonth).toFixed(2));
+        }
+      }
+
+      // 1. Gross Salary = Effective Base + Allowances + Overtime + Bonuses
+      const grossSalary = Number((effectiveBaseSalary + allowances + overtime + bonuses).toFixed(2));
+
+      // 2. Absence Deductions = (Days Absent * (Full Base Salary / 30))
+      // Note: Only absences occurring on/after hire_date were counted in SQL
       const daysAbsent = Number(emp.days_absent || 0);
-      const dailyRate = baseSalary > 0 ? baseSalary / 30 : 0;
+      const dailyRate = fullBaseSalary > 0 ? fullBaseSalary / 30 : 0;
       const absenceDeduction = Number((daysAbsent * dailyRate).toFixed(2));
 
       // Net earned base after unexcused absences
-      const earnedBase = Math.max(0, baseSalary - absenceDeduction);
+      const earnedBase = Math.max(0, effectiveBaseSalary - absenceDeduction);
 
       // 3. Ethiopian Statutory Pension
       // Employee Pension: 7% of basic earned salary
@@ -164,9 +199,16 @@ const getPayrollSummary = async (periodMonth) => {
         employee_code: emp.employee_code,
         first_name: emp.first_name,
         last_name: emp.last_name,
+        hire_date: emp.hire_date,
+        shift_start_time: emp.shift_start_time,
+        shift_end_time: emp.shift_end_time,
+        work_hours: emp.work_hours,
+        is_prorated: isProrated,
+        active_days: activeDaysInMonth,
+        full_base_salary: fullBaseSalary,
         department_name: emp.department_name,
         position_title: emp.position_title,
-        base_salary: baseSalary,
+        base_salary: effectiveBaseSalary,
         allowances,
         overtime,
         bonuses,

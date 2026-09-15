@@ -195,6 +195,12 @@ CREATE TABLE IF NOT EXISTS employees (
 
     salary NUMERIC(12,2) DEFAULT 0,
 
+    shift_start_time TIME DEFAULT '18:00',
+
+    shift_end_time TIME DEFAULT '07:00',
+
+    work_hours NUMERIC(4,2) DEFAULT 8.00,
+
     status employee_status DEFAULT 'active',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

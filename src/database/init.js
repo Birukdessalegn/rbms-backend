@@ -260,6 +260,11 @@ const initializeDatabase = async () => {
         UNIQUE(payroll_run_id, employee_id)
       );
 
+      -- Auto-migrate employees table for shift work hours
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_start_time TIME DEFAULT '18:00';
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_end_time TIME DEFAULT '07:00';
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_hours NUMERIC(4,2) DEFAULT 8.00;
+
       -- Ensure cPanel user ambbatxv has full rights if role exists
       DO $$
       BEGIN

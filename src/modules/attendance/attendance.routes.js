@@ -34,4 +34,9 @@ router.post(
   attendanceController.createAttendance
 );
 
+router.post(
+  "/auto-mark",
+  attendanceController.triggerAutoMark
+);
+
 module.exports = router;

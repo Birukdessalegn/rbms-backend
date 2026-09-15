@@ -240,6 +240,115 @@ const createAttendance = async (data) => {
   return result.rows[0];
 };
 
+/**
+ * Auto-mark absentees for a given shift date (run at 7:00 AM when the club night shift concludes).
+ * Any active staff who did not check in and is not on approved leave is marked 'absent'.
+ * Staff on approved leave are marked 'on_leave'.
+ */
+const autoMarkDailyAbsentees = async (targetDate = null) => {
+  // If targetDate not given, default to yesterday's date (night shift that ends at 7:00 AM)
+  const dateRes = await pool.query(
+    `SELECT COALESCE($1::date, (CURRENT_DATE - INTERVAL '1 day')::date) AS shift_date`,
+    [targetDate]
+  );
+  const shiftDate = dateRes.rows[0].shift_date;
+
+  // Find active employees hired on or before shiftDate who have no attendance record
+  const missingStaffQuery = `
+    SELECT 
+      e.id AS employee_id,
+      e.employee_code,
+      e.first_name,
+      e.last_name,
+      e.hire_date,
+      lr.id AS leave_request_id
+    FROM employees e
+    LEFT JOIN attendance a 
+      ON a.employee_id = e.id AND a.attendance_date = $1
+    LEFT JOIN leave_requests lr 
+      ON lr.employee_id = e.id 
+      AND lr.status = 'approved'
+      AND $1 BETWEEN lr.start_date AND lr.end_date
+    WHERE e.status = 'active'
+      AND (e.hire_date IS NULL OR e.hire_date <= $1)
+      AND a.id IS NULL
+  `;
+
+  const { rows: missingStaff } = await pool.query(missingStaffQuery, [shiftDate]);
+
+  if (missingStaff.length === 0) {
+    return {
+      date: shiftDate,
+      markedAbsent: 0,
+      markedOnLeave: 0,
+      totalProcessed: 0,
+      message: `No missing attendance records found for ${shiftDate}.`
+    };
+  }
+
+  let markedAbsent = 0;
+  let markedOnLeave = 0;
+
+  for (const staff of missingStaff) {
+    const isLeave = Boolean(staff.leave_request_id);
+    const status = isLeave ? "on_leave" : "absent";
+    const notes = isLeave
+      ? "Auto-marked: Approved leave on schedule"
+      : "Auto-marked absent: Night shift ended at 7:00 AM without check-in";
+
+    await pool.query(
+      `
+      INSERT INTO attendance (
+        employee_id,
+        attendance_date,
+        status,
+        notes
+      )
+      VALUES ($1, $2, $3::attendance_status, $4)
+      ON CONFLICT (employee_id, attendance_date) DO NOTHING
+      `,
+      [staff.employee_id, shiftDate, status, notes]
+    );
+
+    if (isLeave) markedOnLeave++;
+    else markedAbsent++;
+  }
+
+  return {
+    date: shiftDate,
+    markedAbsent,
+    markedOnLeave,
+    totalProcessed: missingStaff.length,
+    message: `Processed ${missingStaff.length} employees for ${shiftDate}: ${markedAbsent} absent, ${markedOnLeave} on leave.`
+  };
+};
+
+/**
+ * Catch-up missing attendance dates up to yesterday
+ * Useful on system startup so that any days missed while the server was offline are backfilled.
+ */
+const catchUpMissedAbsentees = async () => {
+  const datesRes = await pool.query(`
+    SELECT d::date AS past_date
+    FROM generate_series(
+      DATE_TRUNC('month', CURRENT_DATE)::date,
+      (CURRENT_DATE - INTERVAL '1 day')::date,
+      INTERVAL '1 day'
+    ) d
+    ORDER BY d ASC
+  `);
+
+  const results = [];
+  for (const row of datesRes.rows) {
+    const res = await autoMarkDailyAbsentees(row.past_date);
+    if (res.totalProcessed > 0) {
+      results.push(res);
+    }
+  }
+
+  return results;
+};
+
 module.exports = {
   getAllAttendance,
   getEmployeeAttendance,
@@ -247,4 +356,6 @@ module.exports = {
   checkIn,
   checkOut,
   createAttendance,
+  autoMarkDailyAbsentees,
+  catchUpMissedAbsentees,
 };

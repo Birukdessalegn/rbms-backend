@@ -17,6 +17,9 @@ const getAllEmployees = async () => {
       e.address,
       e.hire_date,
       e.salary,
+      e.shift_start_time,
+      e.shift_end_time,
+      e.work_hours,
       e.status,
       e.user_id,
       u.username,
@@ -62,6 +65,9 @@ const getEmployeeById = async (id) => {
       e.address,
       e.hire_date,
       e.salary,
+      e.shift_start_time,
+      e.shift_end_time,
+      e.work_hours,
       e.status,
       e.user_id,
       u.username,
@@ -109,6 +115,9 @@ const createEmployee = async (employee) => {
     const address = employee.address || null;
     const hireDate = employee.hireDate || employee.hire_date || null;
     const salary = employee.salary || 0;
+    const shiftStartTime = employee.shiftStartTime || employee.shift_start_time || "18:00";
+    const shiftEndTime = employee.shiftEndTime || employee.shift_end_time || "07:00";
+    const workHours = employee.workHours || employee.work_hours || 8.00;
     const username = employee.username;
     const password = employee.password;
     const employeeCode = employee.employeeCode || employee.employee_code || employee.code;
@@ -381,6 +390,9 @@ const createEmployee = async (employee) => {
         user_id,
         hire_date,
         salary,
+        shift_start_time,
+        shift_end_time,
+        work_hours,
         status
       )
 
@@ -396,7 +408,10 @@ const createEmployee = async (employee) => {
         $9,
         $10,
         $11,
-        $12
+        $12,
+        $13,
+        $14,
+        $15
       )
 
       RETURNING *
@@ -413,6 +428,9 @@ const createEmployee = async (employee) => {
         user.id,
         hireDate || null,
         salary || 0,
+        shiftStartTime,
+        shiftEndTime,
+        workHours,
         "active",
       ]
     );
@@ -431,6 +449,9 @@ const createEmployee = async (employee) => {
         e.address,
         e.hire_date,
         e.salary,
+        e.shift_start_time,
+        e.shift_end_time,
+        e.work_hours,
         e.status,
         e.user_id,
 
@@ -511,6 +532,12 @@ const updateEmployee = async (id, employee) => {
     hireDate,
     hire_date,
     salary,
+    shiftStartTime,
+    shift_start_time,
+    shiftEndTime,
+    shift_end_time,
+    workHours,
+    work_hours,
     status,
     username,
     password,
@@ -590,8 +617,11 @@ const updateEmployee = async (id, employee) => {
       hire_date = COALESCE($9, hire_date),
       salary = COALESCE($10, salary),
       status = COALESCE($11::employee_status, status),
+      shift_start_time = COALESCE($12, shift_start_time),
+      shift_end_time = COALESCE($13, shift_end_time),
+      work_hours = COALESCE($14, work_hours),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $12
+    WHERE id = $15
     RETURNING *
     `,
     [
@@ -606,6 +636,9 @@ const updateEmployee = async (id, employee) => {
       hireDate || hire_date || null,
       salary !== undefined && salary !== null && salary !== "" ? Number(salary) : null,
       status || null,
+      shiftStartTime || shift_start_time || null,
+      shiftEndTime || shift_end_time || null,
+      workHours || work_hours ? Number(workHours || work_hours) : null,
       id,
     ]
   );
@@ -665,6 +698,9 @@ const updateEmployee = async (id, employee) => {
       e.address,
       e.hire_date,
       e.salary,
+      e.shift_start_time,
+      e.shift_end_time,
+      e.work_hours,
       e.status,
       e.user_id,
       r.id AS role_id,

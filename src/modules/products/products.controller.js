@@ -206,17 +206,20 @@ const getCategories = async (req, res) => {
 // POST /api/products/categories
 const createCategory = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, description, type } = req.body;
 
-    if (!name) {
+    if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
         message: "Category name is required",
       });
     }
 
-    const category =
-      await productsService.createCategory(req.body);
+    const category = await productsService.createCategory({
+      name: name.trim(),
+      description: description ? description.trim() : null,
+      type: type || "food",
+    });
 
     res.status(201).json({
       success: true,
@@ -226,9 +229,16 @@ const createCategory = async (req, res) => {
   } catch (error) {
     console.error("Create category error:", error);
 
+    if (error.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        message: "A category with this name already exists",
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: "Failed to create category",
+      message: error.message || "Failed to create category",
     });
   }
 };

@@ -367,6 +367,16 @@ const deleteProduct = async (id) => {
 
 // Get product categories
 const getCategories = async () => {
+  try {
+    await pool.query(`
+      INSERT INTO product_categories (name, description, type)
+      VALUES ('Fruit', 'Fresh fruit items', 'food')
+      ON CONFLICT (name) DO NOTHING
+    `);
+  } catch (err) {
+    // If table or constraint is not yet present, silently fall through
+  }
+
   const result = await pool.query(`
     SELECT
       id,

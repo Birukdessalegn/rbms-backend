@@ -1027,6 +1027,7 @@ ON CONFLICT (name) DO NOTHING;
 INSERT INTO product_categories (name, description, type)
 VALUES
     ('Food', 'Restaurant food items', 'food'),
+    ('Fruit', 'Fresh fruit items', 'food'),
     ('Beverages', 'Non-alcoholic beverages', 'beverage'),
     ('Bar', 'Bar products', 'bar'),
     ('Kitchen Supplies', 'Kitchen supplies', 'supply'),

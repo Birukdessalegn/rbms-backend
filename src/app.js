@@ -20,6 +20,7 @@ const leaveRoutes = require("./modules/leave/leave.routes");
 const tableRoutes = require("./modules/tables/table.routes");
 const vipCustomersRoutes = require("./modules/customers/vip_customers.routes");
 const notificationsRoutes = require("./modules/notifications/notifications.routes");
+const payrollRoutes = require("./modules/payroll/payroll.routes");
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use("/api/tables", tableRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/vip-customers", vipCustomersRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/payroll", payrollRoutes);
 
 // Test route
 app.get("/", (req, res) => {

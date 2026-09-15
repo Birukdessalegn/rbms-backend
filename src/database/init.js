@@ -219,6 +219,44 @@ const initializeDatabase = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS payroll_runs (
+        id SERIAL PRIMARY KEY,
+        period_month VARCHAR(7) NOT NULL UNIQUE,
+        status VARCHAR(30) DEFAULT 'draft',
+        total_employees INTEGER DEFAULT 0,
+        total_gross NUMERIC(12,2) DEFAULT 0.00,
+        total_deductions NUMERIC(12,2) DEFAULT 0.00,
+        total_net NUMERIC(12,2) DEFAULT 0.00,
+        processed_by UUID REFERENCES users(id),
+        approved_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS payroll_items (
+        id SERIAL PRIMARY KEY,
+        payroll_run_id INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        base_salary NUMERIC(12,2) DEFAULT 0.00,
+        days_worked INTEGER DEFAULT 0,
+        days_absent INTEGER DEFAULT 0,
+        allowances NUMERIC(12,2) DEFAULT 0.00,
+        overtime NUMERIC(12,2) DEFAULT 0.00,
+        bonuses NUMERIC(12,2) DEFAULT 0.00,
+        gross_salary NUMERIC(12,2) DEFAULT 0.00,
+        absence_deduction NUMERIC(12,2) DEFAULT 0.00,
+        pension_employee NUMERIC(12,2) DEFAULT 0.00,
+        pension_employer NUMERIC(12,2) DEFAULT 0.00,
+        income_tax NUMERIC(12,2) DEFAULT 0.00,
+        other_deductions NUMERIC(12,2) DEFAULT 0.00,
+        total_deductions NUMERIC(12,2) DEFAULT 0.00,
+        net_salary NUMERIC(12,2) DEFAULT 0.00,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(payroll_run_id, employee_id)
+      );
+
       -- Ensure cPanel user ambbatxv has full rights if role exists
       DO $$
       BEGIN

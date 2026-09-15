@@ -1,78 +1,51 @@
 const payrollService = require("./payroll.service");
 
-// GET /api/payroll/summary?month=YYYY-MM
 const getSummary = async (req, res) => {
   try {
     const { month } = req.query;
     const summary = await payrollService.getPayrollSummary(month);
-
-    return res.json({
-      success: true,
-      data: summary,
-    });
+    res.json({ success: true, data: summary });
   } catch (error) {
-    console.error("GET PAYROLL SUMMARY ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to load payroll summary",
-    });
+    console.error("Payroll summary error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// POST /api/payroll/runs
-const createRun = async (req, res) => {
+const saveRun = async (req, res) => {
   try {
-    const { periodMonth, items, notes } = req.body;
-    const userId = req.user?.id || null;
-
-    if (!periodMonth) {
-      return res.status(400).json({
-        success: false,
-        message: "periodMonth is required",
-      });
+    const { periodMonth, items, notes, status } = req.body;
+    if (!periodMonth || !Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: "Period month and items array are required" });
     }
-
-    const result = await payrollService.approvePayrollRun({
+    const processedBy = req.user?.id || null;
+    const result = await payrollService.savePayrollRun({
       periodMonth,
       items,
       notes,
-      userId,
+      processedBy,
+      status: status || "approved"
     });
-
-    return res.status(201).json({
-      success: true,
-      message: `Payroll for ${periodMonth} approved and locked successfully`,
-      data: result,
-    });
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
-    console.error("APPROVE PAYROLL ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to approve payroll run",
-    });
+    console.error("Save payroll run error:", error);
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// GET /api/payroll/runs
-const getRuns = async (req, res) => {
+const getHistory = async (req, res) => {
   try {
-    const runs = await payrollService.getPayrollRuns();
-
-    return res.json({
-      success: true,
-      data: runs,
-    });
+    const history = await payrollService.getPayrollHistory();
+    res.json({ success: true, data: history });
   } catch (error) {
-    console.error("GET PAYROLL RUNS ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to fetch payroll runs",
-    });
+    console.error("Payroll history error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 module.exports = {
   getSummary,
-  createRun,
-  getRuns,
+  saveRun,
+  createRun: saveRun,
+  getHistory,
+  getRuns: getHistory
 };

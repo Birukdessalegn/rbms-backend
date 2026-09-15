@@ -1,15 +1,18 @@
 const express = require("express");
 const router = express.Router();
 const payrollController = require("./payroll.controller");
-const authenticate = require("../../middleware/auth.middleware");
+const authMiddleware = require("../../middleware/auth.middleware");
 const authorize = require("../../middleware/role.middleware");
 
-// Require authentication for all payroll routes
-router.use(authenticate);
+// Require valid authentication
+router.use(authMiddleware);
 
-// Accessible by Admin, HR, and Finance
-router.get("/summary", authorize("admin", "hr", "finance"), payrollController.getSummary);
-router.post("/runs", authorize("admin", "hr", "finance"), payrollController.createRun);
-router.get("/runs", authorize("admin", "hr", "finance"), payrollController.getRuns);
+// Restrict payroll viewing and calculation to HR, Finance, and Executive management
+router.use(authorize("admin", "hr", "finance", "manager"));
+
+router.get("/summary", payrollController.getSummary);
+router.post("/runs", payrollController.saveRun);
+router.get("/history", payrollController.getHistory);
+router.get("/runs", payrollController.getHistory);
 
 module.exports = router;

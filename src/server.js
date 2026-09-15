@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const app = require("./app");
 const pool = require("./config/database");
+const initializeDatabase = require("./database/init");
 
 const PORT = process.env.PORT || 8000;
 
@@ -11,14 +12,11 @@ const startServer = async () => {
 
     console.log("✅ Database connection successful");
 
-    // Auto-migrate tags column idempotently
+    // Initialize database schema and auto-run migrations
     try {
-      await pool.query(`
-        ALTER TABLE products ADD COLUMN IF NOT EXISTS tags VARCHAR(255) DEFAULT '';
-      `);
-      console.log("✅ Database schema sync & migrations verified");
-    } catch (migErr) {
-      console.warn("⚠️ Database auto-migration check notice:", migErr.message);
+      await initializeDatabase();
+    } catch (dbErr) {
+      console.warn("⚠️ Database initialization check notice:", dbErr.message);
     }
 
     // Bind to "0.0.0.0" so mobile devices on Wi-Fi can connect

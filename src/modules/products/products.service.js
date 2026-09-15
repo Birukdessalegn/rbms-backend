@@ -23,6 +23,7 @@ const getAllProducts = async () => {
       p.shots_capacity,
       p.is_shot_item,
       COALESCE(p.applicable_for, 'both') AS applicable_for,
+      COALESCE(p.tags, '') AS tags,
       parent_p.name AS parent_product_name,
       p.created_at,
       p.updated_at,
@@ -123,6 +124,7 @@ const getProductById = async (id) => {
       p.shots_capacity,
       p.is_shot_item,
       COALESCE(p.applicable_for, 'both') AS applicable_for,
+      COALESCE(p.tags, '') AS tags,
       COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
       COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
       parent_p.name AS parent_product_name,
@@ -178,6 +180,7 @@ const createProduct = async (data) => {
   const resolvedApplicableFor = applicable_for || applicableFor || "both";
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
+  const tags = (data.tags || data.tag || "").trim();
 
   let resolvedProductCode = (productCode || data.product_code || "").trim();
 
@@ -249,7 +252,8 @@ const createProduct = async (data) => {
       is_shot_item,
       low_stock_threshold,
       out_of_stock_threshold,
-      applicable_for
+      applicable_for,
+      tags
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -265,7 +269,8 @@ const createProduct = async (data) => {
       COALESCE($18, FALSE),
       COALESCE($19, 5),
       COALESCE($20, 0),
-      COALESCE($21, 'both')
+      COALESCE($21, 'both'),
+      COALESCE($22, '')
     )
     RETURNING *
     `,
@@ -291,6 +296,7 @@ const createProduct = async (data) => {
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : 5,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : 0,
       resolvedApplicableFor,
+      tags,
     ]
   );
 
@@ -332,6 +338,7 @@ const updateProduct = async (id, data) => {
 
   const shotsCapacity = data.shotsCapacity !== undefined ? data.shotsCapacity : data.shots_capacity;
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
+  const tags = data.tags !== undefined ? String(data.tags).trim() : (data.tag !== undefined ? String(data.tag).trim() : null);
 
   const result = await pool.query(
     `
@@ -358,8 +365,9 @@ const updateProduct = async (id, data) => {
       low_stock_threshold = COALESCE($19, low_stock_threshold),
       out_of_stock_threshold = COALESCE($20, out_of_stock_threshold),
       applicable_for = COALESCE($21, applicable_for),
+      tags = COALESCE($22, tags),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $22
+    WHERE id = $23
     RETURNING *
     `,
     [
@@ -384,6 +392,7 @@ const updateProduct = async (id, data) => {
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : null,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : null,
       resolvedApplicableFor,
+      tags,
       id,
     ]
   );
@@ -417,7 +426,10 @@ const getCategories = async () => {
   try {
     await pool.query(`
       INSERT INTO product_categories (name, description, type)
-      VALUES ('Fruit', 'Fresh fruit items', 'food')
+      VALUES 
+        ('Food', 'All kitchen food and meals', 'food'),
+        ('Drink', 'All beverages, bar items and drinks', 'bar'),
+        ('Fruit', 'Fresh fruit items', 'food')
       ON CONFLICT (name) DO NOTHING
     `);
   } catch (err) {

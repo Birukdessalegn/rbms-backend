@@ -572,6 +572,7 @@ const createOrder = async (order) => {
             p.serving_size,
             p.shots_capacity,
             p.is_shot_item,
+            COALESCE(p.tags, '') AS tags,
             pc.name AS category_name,
             pc.type AS category_type
 

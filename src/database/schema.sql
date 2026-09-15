@@ -384,6 +384,7 @@ CREATE TABLE IF NOT EXISTS products (
     shots_capacity INTEGER DEFAULT 30,
     is_shot_item BOOLEAN DEFAULT FALSE,
     applicable_for VARCHAR(50) DEFAULT 'both',
+    tags VARCHAR(255) DEFAULT '',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

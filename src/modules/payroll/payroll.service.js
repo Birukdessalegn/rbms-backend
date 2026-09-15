@@ -45,7 +45,7 @@ const getPayrollSummary = async (periodMonth) => {
 
   // 1. Check if an approved/saved payroll run already exists for this month
   const savedRunQuery = `
-    SELECT pr.*, u.name AS processed_by_username
+    SELECT pr.*, u.username AS processed_by_username
     FROM payroll_runs pr
     LEFT JOIN users u ON pr.processed_by = u.id
     WHERE pr.period_month = $1
@@ -310,7 +310,7 @@ const savePayrollRun = async ({ periodMonth, items, notes = "", processedBy = nu
  */
 const getPayrollHistory = async () => {
   const query = `
-    SELECT pr.*, u.name AS processed_by_username
+    SELECT pr.*, u.username AS processed_by_username
     FROM payroll_runs pr
     LEFT JOIN users u ON pr.processed_by = u.id
     ORDER BY pr.period_month DESC

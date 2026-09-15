@@ -109,18 +109,17 @@ const addVipDebt = async (customerId, amount) => {
   const currentDebt = Number(customer.current_debt || 0);
   const availableBalance = creditLimit - currentDebt;
 
-  // Gold VIP, Promoter VIP, or credit_limit <= 0 or >= 999999 has UNLIMITED credit / money
+  // Gold VIP or credit_limit >= 999999 has UNLIMITED credit / money
   const tierLower = (customer.tier || "").toLowerCase();
   const isUnlimitedVip =
     tierLower.includes("gold") ||
-    tierLower.includes("promoter") ||
     tierLower.includes("unlimited") ||
-    creditLimit <= 0 ||
+    (creditLimit <= 0 && !tierLower.includes("promoter")) ||
     creditLimit >= 999999;
 
   if (!isUnlimitedVip && availableBalance < spendAmt) {
     throw new Error(
-      `Insufficient VIP balance. Remaining balance is ${availableBalance} ETB. Ask Admin to refill.`
+      `Insufficient VIP balance. Remaining balance is ${availableBalance.toFixed(2)} ETB. Ask Admin to refill.`
     );
   }
 

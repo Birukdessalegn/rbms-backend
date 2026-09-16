@@ -145,6 +145,7 @@ const updateProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update product",
+      error: error.message,
     });
   }
 };

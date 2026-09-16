@@ -385,6 +385,7 @@ const updateProduct = async (id, data) => {
       is_todays_special = COALESCE($13, is_todays_special),
       parent_product_id = CASE WHEN $14::text = 'null' THEN NULL WHEN $14 IS NOT NULL THEN $14::integer ELSE parent_product_id END,
       portion_ratio = COALESCE($15, portion_ratio),
+      serving_size = COALESCE($16, serving_size),
       shots_capacity = CASE WHEN $18::boolean IS FALSE THEN 0 WHEN $17 IS NOT NULL THEN $17::integer ELSE shots_capacity END,
       is_shot_item = COALESCE($18, is_shot_item),
       low_stock_threshold = COALESCE($19, low_stock_threshold),

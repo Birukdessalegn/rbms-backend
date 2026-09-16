@@ -123,8 +123,8 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
 // GET CURRENT SHIFT FOR CASHIER
 // ============================================================
 const getCurrentShift = async (cashierId) => {
-  // 1. Check for active open shift
-  const openResult = await pool.query(
+  // 1. Check for active open shift for this cashier
+  let openResult = await pool.query(
     `
     SELECT 
       cs.*,
@@ -140,6 +140,24 @@ const getCurrentShift = async (cashierId) => {
   );
 
   let shift = openResult.rows[0];
+
+  // 1b. Global fallback: check if any open shift exists system-wide (for shared terminals / managers)
+  if (!shift) {
+    const globalOpen = await pool.query(
+      `
+      SELECT 
+        cs.*,
+        COALESCE(e.first_name || ' ' || e.last_name, cs.cashier_name, u.username) AS cashier_display_name
+      FROM cashier_shifts cs
+      LEFT JOIN users u ON cs.cashier_id = u.id
+      LEFT JOIN employees e ON e.user_id = u.id
+      WHERE cs.status = 'open'
+      ORDER BY cs.start_time DESC
+      LIMIT 1
+      `
+    );
+    shift = globalOpen.rows[0];
+  }
 
   // 2. If no open shift, check if there was a shift started today
   if (!shift) {
@@ -168,7 +186,7 @@ const getCurrentShift = async (cashierId) => {
   // 3. Compute stats
   const isLive = shift.status === "open";
   const stats = await getPaymentSalesStats(
-    cashierId,
+    shift.cashier_id,
     shift.start_time,
     isLive ? null : shift.end_time,
     shift.id
@@ -205,14 +223,15 @@ const startShift = async (cashierId, shiftData = {}) => {
   const initialCash = parseFloat(opening_cash !== undefined ? opening_cash : openingCash || 0.0);
   const terminal = terminal_id !== undefined ? terminal_id : terminalId || 1;
 
-  // 1. Check if an active open shift already exists
+  // 1. Check if an active open shift already exists for this cashier
   const existing = await pool.query(
     `SELECT id, status, start_time FROM cashier_shifts WHERE cashier_id = $1 AND status = 'open' LIMIT 1`,
     [cashierId]
   );
 
   if (existing.rows.length > 0) {
-    throw new Error("You already have an active open shift. Please close it before starting a new one.");
+    // If already open, return the active shift directly
+    return await getCurrentShift(cashierId);
   }
 
   // 2. Fetch cashier display name
@@ -229,7 +248,7 @@ const startShift = async (cashierId, shiftData = {}) => {
   const cashierName = userResult.rows[0]?.display_name || "Cashier";
 
   // 3. Insert new shift
-  const insertResult = await pool.query(
+  await pool.query(
     `
     INSERT INTO cashier_shifts (
       cashier_id,
@@ -252,41 +271,57 @@ const startShift = async (cashierId, shiftData = {}) => {
       updated_at
     )
     VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 'open', CURRENT_TIMESTAMP)
-    RETURNING *
     `,
     [cashierId, cashierName, terminal, initialCash]
   );
 
-  const newShift = insertResult.rows[0];
-  return {
-    ...newShift,
-    cashier_display_name: cashierName,
-    opening_cash: parseFloat(newShift.opening_cash),
-    expected_cash: parseFloat(newShift.expected_cash),
-    open_unpaid_orders_count: 0,
-    payments_breakdown: [],
-  };
+  return await getCurrentShift(cashierId);
 };
 
 // ============================================================
 // CLOSE SHIFT
 // ============================================================
 const closeShift = async (cashierId, closingData = {}) => {
-  const { actual_cash, actualCash, closing_notes, closingNotes, cashier_notes, cashierNotes } = closingData;
-  const countedCash = parseFloat(actual_cash !== undefined ? actual_cash : actualCash);
-  const notes = closing_notes || closingNotes || cashier_notes || cashierNotes || null;
+  const {
+    actual_cash,
+    actualCash,
+    actual_cash_counted,
+    actualCashCounted,
+    closing_notes,
+    closingNotes,
+    cashier_notes,
+    cashierNotes,
+    notes: fallbackNotes,
+  } = closingData;
+
+  const rawCash = actual_cash !== undefined
+    ? actual_cash
+    : (actualCash !== undefined
+        ? actualCash
+        : (actual_cash_counted !== undefined ? actual_cash_counted : actualCashCounted));
+
+  const countedCash = parseFloat(rawCash);
+  const notes = closing_notes || closingNotes || cashier_notes || cashierNotes || fallbackNotes || null;
 
   if (isNaN(countedCash)) {
     throw new Error("Actual counted cash (actual_cash) is required to close a shift.");
   }
 
   // 1. Get active open shift
-  const openShiftResult = await pool.query(
+  let openShiftResult = await pool.query(
     `SELECT * FROM cashier_shifts WHERE cashier_id = $1 AND status = 'open' ORDER BY start_time DESC LIMIT 1`,
     [cashierId]
   );
 
-  const shift = openShiftResult.rows[0];
+  let shift = openShiftResult.rows[0];
+  if (!shift) {
+    // Global fallback if closing on behalf of system
+    const anyOpen = await pool.query(
+      `SELECT * FROM cashier_shifts WHERE status = 'open' ORDER BY start_time DESC LIMIT 1`
+    );
+    shift = anyOpen.rows[0];
+  }
+
   if (!shift) {
     throw new Error("No active open shift found to close.");
   }

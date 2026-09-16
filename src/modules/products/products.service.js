@@ -383,17 +383,17 @@ const updateProduct = async (id, data) => {
       is_active = COALESCE($11, is_active),
       menu_type = COALESCE($12, menu_type),
       is_todays_special = COALESCE($13, is_todays_special),
-      parent_product_id = CASE WHEN $14::text = 'null' THEN NULL WHEN $14 IS NOT NULL THEN $14::integer ELSE parent_product_id END,
-      portion_ratio = COALESCE($15, portion_ratio),
+      parent_product_id = CASE WHEN $14::text = 'null' THEN NULL WHEN $14::integer IS NOT NULL THEN $14::integer ELSE parent_product_id END,
+      portion_ratio = COALESCE($15::numeric, portion_ratio),
       serving_size = COALESCE($16, serving_size),
-      shots_capacity = CASE WHEN $18::boolean IS FALSE THEN 0 WHEN $17 IS NOT NULL THEN $17::integer ELSE shots_capacity END,
-      is_shot_item = COALESCE($18, is_shot_item),
-      low_stock_threshold = COALESCE($19, low_stock_threshold),
-      out_of_stock_threshold = COALESCE($20, out_of_stock_threshold),
+      shots_capacity = COALESCE($17::integer, shots_capacity),
+      is_shot_item = COALESCE($18::boolean, is_shot_item),
+      low_stock_threshold = COALESCE($19::numeric, low_stock_threshold),
+      out_of_stock_threshold = COALESCE($20::numeric, out_of_stock_threshold),
       applicable_for = COALESCE($21, applicable_for),
       tags = COALESCE($22, tags),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $23
+    WHERE id = $23::integer
     RETURNING *
     `,
     [

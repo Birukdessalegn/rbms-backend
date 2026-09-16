@@ -125,15 +125,13 @@ const createEmployee = async (employee) => {
     const rawDept = employee.department || employee.departmentId || employee.department_id;
 
     // -----------------------------------------------------
-    // VALIDATE LOGIN INFORMATION
+    // VALIDATE LOGIN INFORMATION (Optional for offline staff)
     // -----------------------------------------------------
 
-    if (!username) {
-      throw new Error("Username is required");
-    }
+    const hasLoginCredentials = Boolean(username && String(username).trim());
 
-    if (!password) {
-      throw new Error("Password is required");
+    if (hasLoginCredentials && (!password || !String(password).trim())) {
+      throw new Error("Password is required when providing a username");
     }
 
     if (!rawRole) {
@@ -187,20 +185,22 @@ const createEmployee = async (employee) => {
 
 
     // -----------------------------------------------------
-    // CHECK USERNAME
+    // CHECK USERNAME (If login account is requested)
     // -----------------------------------------------------
 
-    const existingUsername = await client.query(
-      `
-      SELECT id
-      FROM users
-      WHERE username = $1
-      `,
-      [username]
-    );
+    if (hasLoginCredentials) {
+      const existingUsername = await client.query(
+        `
+        SELECT id
+        FROM users
+        WHERE username = $1
+        `,
+        [username]
+      );
 
-    if (existingUsername.rows.length > 0) {
-      throw new Error("Username already exists");
+      if (existingUsername.rows.length > 0) {
+        throw new Error("Username already exists");
+      }
     }
 
 
@@ -208,7 +208,7 @@ const createEmployee = async (employee) => {
     // CHECK EMAIL
     // -----------------------------------------------------
 
-    if (email) {
+    if (email && hasLoginCredentials) {
       const existingEmail = await client.query(
         `
         SELECT id
@@ -226,7 +226,7 @@ const createEmployee = async (employee) => {
 
     // -----------------------------------------------------
     // RESOLVE ROLE (Supports both Frontend role IDs & DB role names)
-    // Frontend IDs: 1=admin, 2=manager, 3=hr, 4=finance, 5=cashier, 6=waiter, 7=chef, 8=bartender
+    // Frontend IDs: 1=admin, 2=manager, 3=hr, 4=finance, 5=cashier, 6=waiter, 7=chef, 8=bartender, 9=fb_controller, 10=fruit_manager, 11=fruit
     // -----------------------------------------------------
 
     let targetRoleName = null;
@@ -244,6 +244,8 @@ const createEmployee = async (employee) => {
         7: "chef",
         8: "bartender",
         9: "fb_controller",
+        10: "fruit_manager",
+        11: "fruit",
       };
       if (frontendRoleMap[numId]) {
         targetRoleName = frontendRoleMap[numId];
@@ -326,50 +328,51 @@ const createEmployee = async (employee) => {
         if (fbDept.rows.length > 0) actualDepartmentId = fbDept.rows[0].id;
         else actualDepartmentId = 1;
       }
+      else if (targetRoleName === "fruit" || targetRoleName === "fruit_manager") {
+        const frDept = await client.query("SELECT id FROM departments WHERE LOWER(name) = 'fruit' LIMIT 1");
+        if (frDept.rows.length > 0) actualDepartmentId = frDept.rows[0].id;
+        else actualDepartmentId = 1;
+      }
       else actualDepartmentId = 1;
     }
 
 
     // -----------------------------------------------------
-    // HASH PASSWORD
+    // CREATE USER ACCOUNT (Only if credentials provided)
     // -----------------------------------------------------
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    let user = null;
+    if (hasLoginCredentials) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      const userResult = await client.query(
+        `
+        INSERT INTO users (
+          username,
+          email,
+          password_hash,
+          role_id,
+          status
+        )
+        VALUES ($1, $2, $3, $4, $5)
 
-
-    // -----------------------------------------------------
-    // CREATE USER ACCOUNT
-    // -----------------------------------------------------
-
-    const userResult = await client.query(
-      `
-      INSERT INTO users (
-        username,
-        email,
-        password_hash,
-        role_id,
-        status
-      )
-      VALUES ($1, $2, $3, $4, $5)
-
-      RETURNING
-        id,
-        username,
-        email,
-        role_id,
-        status,
-        created_at
-      `,
-      [
-        username,
-        email || null,
-        passwordHash,
-        actualRoleId,
-        "active",
-      ]
-    );
-
-    const user = userResult.rows[0];
+        RETURNING
+          id,
+          username,
+          email,
+          role_id,
+          status,
+          created_at
+        `,
+        [
+          username,
+          email || null,
+          passwordHash,
+          actualRoleId,
+          "active",
+        ]
+      );
+      user = userResult.rows[0];
+    }
 
 
     // -----------------------------------------------------
@@ -425,7 +428,7 @@ const createEmployee = async (employee) => {
         address || null,
         actualRoleId,
         actualDepartmentId,
-        user.id,
+        user ? user.id : null,
         hireDate || null,
         salary || 0,
         shiftStartTime,
@@ -481,14 +484,16 @@ const createEmployee = async (employee) => {
     // Return both
     return {
       employee: fullEmployee,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        roleId: user.role_id,
-        role: fullEmployee.role || "cashier",
-        status: user.status,
-      },
+      user: user
+        ? {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            roleId: user.role_id,
+            role: fullEmployee.role || "service",
+            status: user.status,
+          }
+        : null,
     };
 
   } catch (error) {
@@ -567,6 +572,8 @@ const updateEmployee = async (id, employee) => {
         7: "chef",
         8: "bartender",
         9: "fb_controller",
+        10: "fruit_manager",
+        11: "fruit",
       };
       if (frontendRoleMap[rawNum]) {
         const r = await pool.query(
@@ -682,6 +689,18 @@ const updateEmployee = async (id, employee) => {
         `UPDATE users SET ${userUpdates.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = $${pIdx}`,
         userParams
       );
+    }
+  } else if (updatedEmployee && !updatedEmployee.user_id && username && String(username).trim() && password && String(password).trim()) {
+    // Employee was previously offline staff without user account; now granted credentials
+    const passwordHash = await bcrypt.hash(String(password).trim(), 10);
+    const newU = await pool.query(
+      `INSERT INTO users (username, email, password_hash, role_id, status)
+       VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
+      [String(username).trim(), email || null, passwordHash, actualRoleId || updatedEmployee.role_id]
+    );
+    if (newU.rows.length > 0) {
+      await pool.query(`UPDATE employees SET user_id = $1 WHERE id = $2`, [newU.rows[0].id, id]);
+      updatedEmployee.user_id = newU.rows[0].id;
     }
   }
 

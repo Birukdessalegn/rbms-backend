@@ -160,11 +160,20 @@ const initializeDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_kitchen_stock_audits_created ON kitchen_stock_audits(created_at DESC);
 
       INSERT INTO roles (name, description)
-      VALUES ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor')
+      VALUES 
+        ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor'),
+        ('fruit_manager', 'Fruit & Shisha Manager / Supervisor'),
+        ('fruit', 'Fruit Man / Shisha & Fruit Prep Staff')
       ON CONFLICT (name) DO NOTHING;
 
       INSERT INTO departments (name, description)
-      VALUES ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit')
+      VALUES 
+        ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit'),
+        ('Fruit', 'Fruit Preparation, Shisha and Lounge orders'),
+        ('House Keeping', 'Housekeeping and sanitation staff'),
+        ('Security', 'Security and safety personnel'),
+        ('Parking', 'Valet and parking attendants'),
+        ('Lift Man', 'Lift and elevator operators')
       ON CONFLICT (name) DO NOTHING;
     `);
 

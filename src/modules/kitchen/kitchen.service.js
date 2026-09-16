@@ -68,7 +68,10 @@ o.payment_status,
         oi.unit_price,
         oi.notes AS item_notes,
 
-        p.name AS product_name
+        p.name AS product_name,
+        COALESCE(p.tags, '') AS tags,
+        pc.name AS category_name,
+        pc.type AS category_type
 
       FROM kitchen_order_items koi
 
@@ -77,6 +80,9 @@ o.payment_status,
 
       JOIN products p
         ON oi.product_id = p.id
+
+      LEFT JOIN product_categories pc
+        ON p.category_id = pc.id
 
       WHERE koi.kitchen_order_id = $1
 

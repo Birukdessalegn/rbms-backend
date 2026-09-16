@@ -387,7 +387,7 @@ CREATE TABLE IF NOT EXISTS products (
     portion_ratio NUMERIC(10,4) DEFAULT 1.0000,
 
     serving_size VARCHAR(50) DEFAULT 'unit',
-    shots_capacity INTEGER DEFAULT 30,
+    shots_capacity INTEGER DEFAULT 0,
     is_shot_item BOOLEAN DEFAULT FALSE,
     applicable_for VARCHAR(50) DEFAULT 'both',
     tags VARCHAR(255) DEFAULT '',

@@ -46,8 +46,10 @@ const initializeDatabase = async () => {
         );
       ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id INTEGER REFERENCES products(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS portion_ratio NUMERIC(10,4) DEFAULT 1.0000;
-      ALTER TABLE products ADD COLUMN IF NOT EXISTS serving_size VARCHAR(50) DEFAULT 'unit';
-      ALTER TABLE products ADD COLUMN IF NOT EXISTS shots_capacity INTEGER DEFAULT 30;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS shots_capacity INTEGER DEFAULT 0;
+      ALTER TABLE products ALTER COLUMN shots_capacity SET DEFAULT 0;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_shot_item BOOLEAN DEFAULT FALSE;
+      UPDATE products SET shots_capacity = 0 WHERE (is_shot_item IS NOT TRUE OR is_shot_item IS NULL);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS tags VARCHAR(255) DEFAULT '';
       INSERT INTO product_categories (name, description, type)

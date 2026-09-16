@@ -30,6 +30,13 @@ const ALL_PRODUCTS_QUERY = `
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      p.double_shot_price,
+      p.half_bottle_price,
+      p.bottle_price,
+      COALESCE(p.allow_single_shot, TRUE) AS allow_single_shot,
+      COALESCE(p.allow_double_shot, TRUE) AS allow_double_shot,
+      COALESCE(p.allow_half_bottle, TRUE) AS allow_half_bottle,
+      COALESCE(p.allow_full_bottle, TRUE) AS allow_full_bottle,
       COALESCE(p.applicable_for, 'both') AS applicable_for,
       COALESCE(p.tags, '') AS tags,
       parent_p.name AS parent_product_name,
@@ -139,6 +146,13 @@ const GET_PRODUCT_BY_ID_QUERY = `
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      p.double_shot_price,
+      p.half_bottle_price,
+      p.bottle_price,
+      COALESCE(p.allow_single_shot, TRUE) AS allow_single_shot,
+      COALESCE(p.allow_double_shot, TRUE) AS allow_double_shot,
+      COALESCE(p.allow_half_bottle, TRUE) AS allow_half_bottle,
+      COALESCE(p.allow_full_bottle, TRUE) AS allow_full_bottle,
       COALESCE(p.applicable_for, 'both') AS applicable_for,
       COALESCE(p.tags, '') AS tags,
       COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
@@ -208,6 +222,15 @@ const createProduct = async (data) => {
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
   const tags = (data.tags || data.tag || "").trim();
 
+  const doubleShotPrice = data.doubleShotPrice !== undefined && data.doubleShotPrice !== "" && data.doubleShotPrice !== null ? Number(data.doubleShotPrice) : (data.double_shot_price !== undefined && data.double_shot_price !== "" && data.double_shot_price !== null ? Number(data.double_shot_price) : null);
+  const halfBottlePrice = data.halfBottlePrice !== undefined && data.halfBottlePrice !== "" && data.halfBottlePrice !== null ? Number(data.halfBottlePrice) : (data.half_bottle_price !== undefined && data.half_bottle_price !== "" && data.half_bottle_price !== null ? Number(data.half_bottle_price) : null);
+  const bottlePrice = data.bottlePrice !== undefined && data.bottlePrice !== "" && data.bottlePrice !== null ? Number(data.bottlePrice) : (data.bottle_price !== undefined && data.bottle_price !== "" && data.bottle_price !== null ? Number(data.bottle_price) : null);
+
+  const allowSingleShot = data.allowSingleShot !== undefined ? (data.allowSingleShot === true || data.allowSingleShot === "true" || data.allowSingleShot === 1 || data.allowSingleShot === "1") : (data.allow_single_shot !== undefined ? (data.allow_single_shot === true || data.allow_single_shot === "true" || data.allow_single_shot === 1 || data.allow_single_shot === "1") : true);
+  const allowDoubleShot = data.allowDoubleShot !== undefined ? (data.allowDoubleShot === true || data.allowDoubleShot === "true" || data.allowDoubleShot === 1 || data.allowDoubleShot === "1") : (data.allow_double_shot !== undefined ? (data.allow_double_shot === true || data.allow_double_shot === "true" || data.allow_double_shot === 1 || data.allow_double_shot === "1") : true);
+  const allowHalfBottle = data.allowHalfBottle !== undefined ? (data.allowHalfBottle === true || data.allowHalfBottle === "true" || data.allowHalfBottle === 1 || data.allowHalfBottle === "1") : (data.allow_half_bottle !== undefined ? (data.allow_half_bottle === true || data.allow_half_bottle === "true" || data.allow_half_bottle === 1 || data.allow_half_bottle === "1") : true);
+  const allowFullBottle = data.allowFullBottle !== undefined ? (data.allowFullBottle === true || data.allowFullBottle === "true" || data.allowFullBottle === 1 || data.allowFullBottle === "1") : (data.allow_full_bottle !== undefined ? (data.allow_full_bottle === true || data.allow_full_bottle === "true" || data.allow_full_bottle === 1 || data.allow_full_bottle === "1") : true);
+
   let resolvedProductCode = (productCode || data.product_code || "").trim();
 
   // If no product code provided, auto-generate sequential code by category
@@ -276,6 +299,13 @@ const createProduct = async (data) => {
       serving_size,
       shots_capacity,
       is_shot_item,
+      double_shot_price,
+      half_bottle_price,
+      bottle_price,
+      allow_single_shot,
+      allow_double_shot,
+      allow_half_bottle,
+      allow_full_bottle,
       low_stock_threshold,
       out_of_stock_threshold,
       applicable_for,
@@ -293,10 +323,17 @@ const createProduct = async (data) => {
       COALESCE($16, 'unit'),
       COALESCE($17, 0),
       COALESCE($18, FALSE),
-      COALESCE($19, 5),
-      COALESCE($20, 0),
-      COALESCE($21, 'both'),
-      COALESCE($22, '')
+      $19::numeric,
+      $20::numeric,
+      $21::numeric,
+      COALESCE($22::boolean, TRUE),
+      COALESCE($23::boolean, TRUE),
+      COALESCE($24::boolean, TRUE),
+      COALESCE($25::boolean, TRUE),
+      COALESCE($26, 5),
+      COALESCE($27, 0),
+      COALESCE($28, 'both'),
+      COALESCE($29, '')
     )
     RETURNING *
     `,
@@ -319,6 +356,13 @@ const createProduct = async (data) => {
       servingSize || "unit",
       (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") && shotsCapacity !== undefined && shotsCapacity !== null && shotsCapacity !== "" ? parseInt(shotsCapacity, 10) : 0,
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : false,
+      doubleShotPrice,
+      halfBottlePrice,
+      bottlePrice,
+      allowSingleShot,
+      allowDoubleShot,
+      allowHalfBottle,
+      allowFullBottle,
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : 5,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : 0,
       resolvedApplicableFor,
@@ -366,6 +410,15 @@ const updateProduct = async (id, data) => {
   const isShotItem = data.isShotItem !== undefined ? data.isShotItem : data.is_shot_item;
   const tags = data.tags !== undefined ? String(data.tags).trim() : (data.tag !== undefined ? String(data.tag).trim() : null);
 
+  const doubleShotPrice = data.doubleShotPrice !== undefined ? (data.doubleShotPrice === "" || data.doubleShotPrice === null ? "null" : Number(data.doubleShotPrice)) : (data.double_shot_price !== undefined ? (data.double_shot_price === "" || data.double_shot_price === null ? "null" : Number(data.double_shot_price)) : null);
+  const halfBottlePrice = data.halfBottlePrice !== undefined ? (data.halfBottlePrice === "" || data.halfBottlePrice === null ? "null" : Number(data.halfBottlePrice)) : (data.half_bottle_price !== undefined ? (data.half_bottle_price === "" || data.half_bottle_price === null ? "null" : Number(data.half_bottle_price)) : null);
+  const bottlePrice = data.bottlePrice !== undefined ? (data.bottlePrice === "" || data.bottlePrice === null ? "null" : Number(data.bottlePrice)) : (data.bottle_price !== undefined ? (data.bottle_price === "" || data.bottle_price === null ? "null" : Number(data.bottle_price)) : null);
+
+  const allowSingleShot = data.allowSingleShot !== undefined ? (data.allowSingleShot === true || data.allowSingleShot === "true" || data.allowSingleShot === 1 || data.allowSingleShot === "1") : (data.allow_single_shot !== undefined ? (data.allow_single_shot === true || data.allow_single_shot === "true" || data.allow_single_shot === 1 || data.allow_single_shot === "1") : null);
+  const allowDoubleShot = data.allowDoubleShot !== undefined ? (data.allowDoubleShot === true || data.allowDoubleShot === "true" || data.allowDoubleShot === 1 || data.allowDoubleShot === "1") : (data.allow_double_shot !== undefined ? (data.allow_double_shot === true || data.allow_double_shot === "true" || data.allow_double_shot === 1 || data.allow_double_shot === "1") : null);
+  const allowHalfBottle = data.allowHalfBottle !== undefined ? (data.allowHalfBottle === true || data.allowHalfBottle === "true" || data.allowHalfBottle === 1 || data.allowHalfBottle === "1") : (data.allow_half_bottle !== undefined ? (data.allow_half_bottle === true || data.allow_half_bottle === "true" || data.allow_half_bottle === 1 || data.allow_half_bottle === "1") : null);
+  const allowFullBottle = data.allowFullBottle !== undefined ? (data.allowFullBottle === true || data.allowFullBottle === "true" || data.allowFullBottle === 1 || data.allowFullBottle === "1") : (data.allow_full_bottle !== undefined ? (data.allow_full_bottle === true || data.allow_full_bottle === "true" || data.allow_full_bottle === 1 || data.allow_full_bottle === "1") : null);
+
   const result = await pool.query(
     `
     UPDATE products
@@ -388,12 +441,19 @@ const updateProduct = async (id, data) => {
       serving_size = COALESCE($16, serving_size),
       shots_capacity = COALESCE($17::integer, shots_capacity),
       is_shot_item = COALESCE($18::boolean, is_shot_item),
-      low_stock_threshold = COALESCE($19::numeric, low_stock_threshold),
-      out_of_stock_threshold = COALESCE($20::numeric, out_of_stock_threshold),
-      applicable_for = COALESCE($21, applicable_for),
-      tags = COALESCE($22, tags),
+      double_shot_price = CASE WHEN $19::text = 'null' THEN NULL WHEN $19::numeric IS NOT NULL THEN $19::numeric ELSE double_shot_price END,
+      half_bottle_price = CASE WHEN $20::text = 'null' THEN NULL WHEN $20::numeric IS NOT NULL THEN $20::numeric ELSE half_bottle_price END,
+      bottle_price = CASE WHEN $21::text = 'null' THEN NULL WHEN $21::numeric IS NOT NULL THEN $21::numeric ELSE bottle_price END,
+      allow_single_shot = COALESCE($22::boolean, allow_single_shot),
+      allow_double_shot = COALESCE($23::boolean, allow_double_shot),
+      allow_half_bottle = COALESCE($24::boolean, allow_half_bottle),
+      allow_full_bottle = COALESCE($25::boolean, allow_full_bottle),
+      low_stock_threshold = COALESCE($26::numeric, low_stock_threshold),
+      out_of_stock_threshold = COALESCE($27::numeric, out_of_stock_threshold),
+      applicable_for = COALESCE($28, applicable_for),
+      tags = COALESCE($29, tags),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $23::integer
+    WHERE id = $30::integer
     RETURNING *
     `,
     [
@@ -417,6 +477,13 @@ const updateProduct = async (id, data) => {
         ? parseInt(shotsCapacity, 10)
         : (isShotItem === false || isShotItem === "false" || isShotItem === 0 || isShotItem === "0" ? 0 : null),
       isShotItem !== undefined && isShotItem !== null ? (isShotItem === true || isShotItem === "true" || isShotItem === 1 || isShotItem === "1") : null,
+      doubleShotPrice,
+      halfBottlePrice,
+      bottlePrice,
+      allowSingleShot,
+      allowDoubleShot,
+      allowHalfBottle,
+      allowFullBottle,
       lowStockThreshold !== undefined && lowStockThreshold !== null ? Number(lowStockThreshold) : null,
       outOfStockThreshold !== undefined && outOfStockThreshold !== null ? Number(outOfStockThreshold) : null,
       resolvedApplicableFor,
@@ -532,6 +599,13 @@ const getMenu = async (menuType) => {
       p.serving_size,
       p.shots_capacity,
       p.is_shot_item,
+      p.double_shot_price,
+      p.half_bottle_price,
+      p.bottle_price,
+      COALESCE(p.allow_single_shot, TRUE) AS allow_single_shot,
+      COALESCE(p.allow_double_shot, TRUE) AS allow_double_shot,
+      COALESCE(p.allow_half_bottle, TRUE) AS allow_half_bottle,
+      COALESCE(p.allow_full_bottle, TRUE) AS allow_full_bottle,
       COALESCE(p.applicable_for, 'both') AS applicable_for,
       p.created_at,
       p.updated_at,

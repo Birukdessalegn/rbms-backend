@@ -389,6 +389,13 @@ CREATE TABLE IF NOT EXISTS products (
     serving_size VARCHAR(50) DEFAULT 'unit',
     shots_capacity INTEGER DEFAULT 0,
     is_shot_item BOOLEAN DEFAULT FALSE,
+    double_shot_price NUMERIC(12,2) DEFAULT NULL,
+    half_bottle_price NUMERIC(12,2) DEFAULT NULL,
+    bottle_price NUMERIC(12,2) DEFAULT NULL,
+    allow_single_shot BOOLEAN DEFAULT TRUE,
+    allow_double_shot BOOLEAN DEFAULT TRUE,
+    allow_half_bottle BOOLEAN DEFAULT TRUE,
+    allow_full_bottle BOOLEAN DEFAULT TRUE,
     applicable_for VARCHAR(50) DEFAULT 'both',
     tags VARCHAR(255) DEFAULT '',
 

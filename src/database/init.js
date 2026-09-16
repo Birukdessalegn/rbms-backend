@@ -52,6 +52,13 @@ const initializeDatabase = async () => {
       UPDATE products SET shots_capacity = 0 WHERE (is_shot_item IS NOT TRUE OR is_shot_item IS NULL);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS applicable_for VARCHAR(50) DEFAULT 'both';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS tags VARCHAR(255) DEFAULT '';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS double_shot_price NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS half_bottle_price NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS bottle_price NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS allow_single_shot BOOLEAN DEFAULT TRUE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS allow_double_shot BOOLEAN DEFAULT TRUE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS allow_half_bottle BOOLEAN DEFAULT TRUE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS allow_full_bottle BOOLEAN DEFAULT TRUE;
       INSERT INTO product_categories (name, description, type)
       VALUES 
         ('Food', 'All kitchen food and meals', 'food'),

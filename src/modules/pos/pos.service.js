@@ -1977,7 +1977,10 @@ const createStaffOrder = async (orderData = {}, user = null) => {
 
     if (employeeId) {
       const empRes = await client.query(
-        `SELECT id, first_name, last_name, department FROM employees WHERE id = $1`,
+        `SELECT e.id, e.first_name, e.last_name, d.name AS department 
+         FROM employees e 
+         LEFT JOIN departments d ON e.department_id = d.id 
+         WHERE e.id = $1`,
         [employeeId]
       );
       if (empRes.rows.length > 0) {
@@ -2024,7 +2027,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
       const quantity = Math.max(1, Number(item.quantity || 1));
       // Staff price is used; if 0, item is free for staff
       const unitPrice = Number(product.staff_price !== null && product.staff_price !== undefined ? product.staff_price : 0);
-      const itemTotal = Number((quantity * unitPrice).toFixed(2));
+      const itemTotal = Number((unitPrice * quantity).toFixed(2));
       subtotal += itemTotal;
 
       resolvedItems.push({
@@ -2206,7 +2209,7 @@ const getTodayStaffOrders = async () => {
        o.created_at,
        e.first_name AS employee_first_name,
        e.last_name AS employee_last_name,
-       e.department AS employee_department,
+       d.name AS employee_department,
        COALESCE(e.first_name || ' ' || e.last_name, 'Staff Member') AS employee_name,
        u.username AS cashier_name,
        COALESCE(
@@ -2245,6 +2248,7 @@ const getTodayStaffOrders = async () => {
        ) AS payments
      FROM orders o
      LEFT JOIN employees e ON o.waiter_id = e.id
+     LEFT JOIN departments d ON e.department_id = d.id
      LEFT JOIN users u ON e.user_id = u.id
      WHERE o.order_type = 'staff'
      ORDER BY o.created_at DESC

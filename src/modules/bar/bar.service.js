@@ -29,6 +29,9 @@ const getAllBarOrders = async () => {
       rt.type AS table_type,
       rt.section AS table_section,
 
+      ew.id AS waiter_employee_id,
+      ew.user_id AS waiter_user_id,
+      uw.username AS waiter_username,
       ew.first_name AS waiter_first_name,
       ew.last_name AS waiter_last_name,
       COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name,

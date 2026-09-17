@@ -88,6 +88,9 @@ const getAllOrders = async () => {
       rt.type AS table_type,
       rt.section AS table_section,
 
+      e.id AS waiter_employee_id,
+      e.user_id AS waiter_user_id,
+      u.username AS waiter_username,
       e.first_name AS waiter_first_name,
       e.last_name AS waiter_last_name,
       COALESCE(e.first_name || ' ' || e.last_name, u.username) AS waiter_name,
@@ -242,6 +245,9 @@ const getOrderById = async (id) => {
       rt.type AS table_type,
       rt.section AS table_section,
 
+      e.id AS waiter_employee_id,
+      e.user_id AS waiter_user_id,
+      u.username AS waiter_username,
       e.first_name AS waiter_first_name,
       e.last_name AS waiter_last_name,
       COALESCE(e.first_name || ' ' || e.last_name, u.username) AS waiter_name,
@@ -2032,9 +2038,11 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     }
 
     const total = Number(subtotal.toFixed(2));
-    const orderNotes = `Staff Meal: ${resolvedEmployeeName}${notes ? ` - ${notes}` : ""}`;
+    const isPaid = paymentStatus === "paid" || total === 0 || paymentMethod === "free";
+    const finalPaymentStatus = isPaid ? "paid" : "pending";
+    const orderNotes = `Staff Meal: ${resolvedEmployeeName}${!isPaid ? " [UNPAID - PAYMENT PENDING]" : ""}${notes ? ` - ${notes}` : ""}`;
 
-    // 3. Create orders record
+    // 3. Create orders record (link to employee as waiter_id)
     const orderRes = await client.query(
       `INSERT INTO orders (
         order_number,
@@ -2052,17 +2060,17 @@ const createStaffOrder = async (orderData = {}, user = null) => {
       RETURNING *`,
       [
         orderNumber,
-        cashierId,
+        resolvedEmployeeId || null,
         total,
         total,
-        total > 0 ? "paid" : "free",
+        finalPaymentStatus,
         orderNotes,
       ]
     );
     const createdOrder = orderRes.rows[0];
 
-    // 4. Record payment if paid
-    if (total > 0) {
+    // 4. Record payment if paid and amount > 0
+    if (isPaid && total > 0) {
       await client.query(
         `INSERT INTO payments (
           order_id,
@@ -2135,12 +2143,13 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     }
 
     // Dispatch Kitchen Order with [STAFF MEAL] tag
+    const mealTicketTag = `[STAFF MEAL: ${resolvedEmployeeName}${!isPaid ? " - UNPAID" : ""}]`;
     if (kitchenItems.length > 0) {
       const koRes = await client.query(
         `INSERT INTO kitchen_orders (order_id, notes, status)
          VALUES ($1, $2, 'pending')
          RETURNING id`,
-        [createdOrder.id, `[STAFF MEAL: ${resolvedEmployeeName}]`]
+        [createdOrder.id, mealTicketTag]
       );
       const kitchenOrderId = koRes.rows[0].id;
       for (const ki of kitchenItems) {
@@ -2158,7 +2167,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
         `INSERT INTO bar_orders (order_id, notes, status)
          VALUES ($1, $2, 'pending')
          RETURNING id`,
-        [createdOrder.id, `[STAFF MEAL: ${resolvedEmployeeName}]`]
+        [createdOrder.id, mealTicketTag]
       );
       const barOrderId = boRes.rows[0].id;
       for (const bi of barItems) {
@@ -2195,6 +2204,10 @@ const getTodayStaffOrders = async () => {
        o.payment_status,
        o.notes,
        o.created_at,
+       e.first_name AS employee_first_name,
+       e.last_name AS employee_last_name,
+       e.department AS employee_department,
+       COALESCE(e.first_name || ' ' || e.last_name, 'Staff Member') AS employee_name,
        u.username AS cashier_name,
        COALESCE(
          (
@@ -2214,9 +2227,25 @@ const getTodayStaffOrders = async () => {
            WHERE oi.order_id = o.id
          ),
          '[]'::json
-       ) AS items
+       ) AS items,
+       COALESCE(
+         (
+           SELECT JSON_AGG(
+             JSON_BUILD_OBJECT(
+               'id', pay.id,
+               'amount', pay.amount,
+               'payment_method', pay.payment_method,
+               'paid_at', pay.paid_at
+             )
+           )
+           FROM payments pay
+           WHERE pay.order_id = o.id AND pay.status = 'paid'
+         ),
+         '[]'::json
+       ) AS payments
      FROM orders o
-     LEFT JOIN users u ON o.waiter_id = u.id
+     LEFT JOIN employees e ON o.waiter_id = e.id
+     LEFT JOIN users u ON e.user_id = u.id
      WHERE o.order_type = 'staff'
      ORDER BY o.created_at DESC
      LIMIT 100`

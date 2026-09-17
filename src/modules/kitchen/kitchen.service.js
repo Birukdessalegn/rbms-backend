@@ -28,6 +28,9 @@ o.payment_status,
       e.last_name AS chef_last_name,
 
       o.waiter_id,
+      ew.id AS waiter_employee_id,
+      ew.user_id AS waiter_user_id,
+      uw.username AS waiter_username,
       ew.first_name AS waiter_first_name,
       ew.last_name AS waiter_last_name,
       COALESCE(ew.first_name || ' ' || ew.last_name, uw.username) AS waiter_name

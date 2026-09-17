@@ -646,7 +646,11 @@ const updateProductMenu = async (id, data) => {
     isAvailable,
     isTodaysSpecial,
     staffPrice,
+    isActive,
+    is_active,
   } = data;
+
+  const resolvedIsActive = isActive !== undefined ? isActive : is_active;
 
   const result = await pool.query(
     `
@@ -656,8 +660,9 @@ const updateProductMenu = async (id, data) => {
       is_available = COALESCE($2, is_available),
       is_todays_special = COALESCE($3, is_todays_special),
       staff_price = COALESCE($4, staff_price),
+      is_active = COALESCE($5, is_active),
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $5
+    WHERE id = $6
     RETURNING *
     `,
     [
@@ -665,6 +670,7 @@ const updateProductMenu = async (id, data) => {
       isAvailable !== undefined ? isAvailable : null,
       isTodaysSpecial !== undefined ? isTodaysSpecial : null,
       staffPrice !== undefined ? staffPrice : null,
+      resolvedIsActive !== undefined ? resolvedIsActive : null,
       id,
     ]
   );

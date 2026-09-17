@@ -1030,41 +1030,7 @@ const updateOrderStatus = async (id, status) => {
     [status, String(id).trim()]
   );
 
-  const updatedOrder = result.rows[0];
-
-  if (updatedOrder) {
-    // Synchronize order items
-    await pool.query(
-      `UPDATE order_items SET status = $1 WHERE order_id = $2`,
-      [status, updatedOrder.id]
-    );
-
-    // Synchronize kitchen orders & items
-    await pool.query(
-      `UPDATE kitchen_orders SET status = $1 WHERE order_id = $2`,
-      [status, updatedOrder.id]
-    );
-    await pool.query(
-      `UPDATE kitchen_order_items SET status = $1 WHERE kitchen_order_id IN (
-        SELECT id FROM kitchen_orders WHERE order_id = $2
-      )`,
-      [status, updatedOrder.id]
-    );
-
-    // Synchronize bar orders & items
-    await pool.query(
-      `UPDATE bar_orders SET status = $1 WHERE order_id = $2`,
-      [status, updatedOrder.id]
-    );
-    await pool.query(
-      `UPDATE bar_order_items SET status = $1 WHERE bar_order_id IN (
-        SELECT id FROM bar_orders WHERE order_id = $2
-      )`,
-      [status, updatedOrder.id]
-    );
-  }
-
-  return updatedOrder || null;
+  return result.rows[0] || null;
 };
 
 
@@ -2005,10 +1971,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
 
     if (employeeId) {
       const empRes = await client.query(
-        `SELECT e.id, e.first_name, e.last_name, d.name AS department
-         FROM employees e
-         LEFT JOIN departments d ON e.department_id = d.id
-         WHERE e.id = $1`,
+        `SELECT id, first_name, last_name, department FROM employees WHERE id = $1`,
         [employeeId]
       );
       if (empRes.rows.length > 0) {
@@ -2069,9 +2032,9 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     }
 
     const total = Number(subtotal.toFixed(2));
-    const orderNotes = `Staff Meal: ${resolvedEmployeeName}`;
+    const orderNotes = `Staff Meal: ${resolvedEmployeeName}${notes ? ` - ${notes}` : ""}`;
 
-    // 3. Create orders record (waiter_id references employees.id, status starts as 'pending' for kitchen/bar prep)
+    // 3. Create orders record
     const orderRes = await client.query(
       `INSERT INTO orders (
         order_number,
@@ -2085,13 +2048,14 @@ const createStaffOrder = async (orderData = {}, user = null) => {
         payment_status,
         notes
       )
-      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'pending', 'paid', $5)
+      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'completed', $5, $6)
       RETURNING *`,
       [
         orderNumber,
-        resolvedEmployeeId,
+        cashierId,
         total,
         total,
+        total > 0 ? "paid" : "free",
         orderNotes,
       ]
     );
@@ -2106,14 +2070,16 @@ const createStaffOrder = async (orderData = {}, user = null) => {
           payment_method,
           reference,
           status,
-          paid_at
+          paid_at,
+          notes
         )
-        VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP)`,
+        VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP, $5)`,
         [
           createdOrder.id,
           total,
           paymentMethod || "cash",
           `STAFF-PAY-${Date.now()}`,
+          `Paid staff meal by ${resolvedEmployeeName}`,
         ]
       );
     }
@@ -2229,8 +2195,7 @@ const getTodayStaffOrders = async () => {
        o.payment_status,
        o.notes,
        o.created_at,
-       COALESCE(e.first_name || ' ' || e.last_name, 'Staff Member') AS staff_member_name,
-       d.name AS staff_department,
+       u.username AS cashier_name,
        COALESCE(
          (
            SELECT JSON_AGG(
@@ -2241,7 +2206,6 @@ const getTodayStaffOrders = async () => {
                'quantity', oi.quantity,
                'unit_price', oi.unit_price,
                'total', oi.total,
-               'status', oi.status,
                'notes', oi.notes
              )
            )
@@ -2252,8 +2216,7 @@ const getTodayStaffOrders = async () => {
          '[]'::json
        ) AS items
      FROM orders o
-     LEFT JOIN employees e ON o.waiter_id = e.id
-     LEFT JOIN departments d ON e.department_id = d.id
+     LEFT JOIN users u ON o.waiter_id = u.id
      WHERE o.order_type = 'staff'
      ORDER BY o.created_at DESC
      LIMIT 100`

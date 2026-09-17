@@ -252,34 +252,7 @@ const updateBarOrderStatus = async (id, status, bartenderId) => {
     ]
   );
 
-  const barOrder = result.rows[0];
-
-  if (barOrder) {
-    // Update bar order items status and order_items
-    await pool.query(
-      `UPDATE bar_order_items SET status = $1 WHERE bar_order_id = $2`,
-      [status, id]
-    );
-
-    await pool.query(
-      `UPDATE order_items
-       SET status = $1
-       WHERE id IN (
-         SELECT order_item_id FROM bar_order_items WHERE bar_order_id = $2
-       )`,
-      [status, id]
-    );
-
-    // Update main order status
-    if (barOrder.order_id) {
-      await pool.query(
-        `UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-        [status, barOrder.order_id]
-      );
-    }
-  }
-
-  return barOrder;
+  return result.rows[0];
 };
 
 

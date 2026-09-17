@@ -2037,7 +2037,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     const total = Number(subtotal.toFixed(2));
     const orderNotes = `Staff Meal: ${resolvedEmployeeName}`;
 
-    // 3. Create orders record (waiter_id references employees.id)
+    // 3. Create orders record (waiter_id references employees.id, status starts as 'pending' for kitchen/bar prep)
     const orderRes = await client.query(
       `INSERT INTO orders (
         order_number,
@@ -2051,7 +2051,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
         payment_status,
         notes
       )
-      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'completed', 'paid', $5)
+      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'pending', 'paid', $5)
       RETURNING *`,
       [
         orderNumber,
@@ -2207,6 +2207,7 @@ const getTodayStaffOrders = async () => {
                'quantity', oi.quantity,
                'unit_price', oi.unit_price,
                'total', oi.total,
+               'status', oi.status,
                'notes', oi.notes
              )
            )

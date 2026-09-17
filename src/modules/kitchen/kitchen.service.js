@@ -308,12 +308,23 @@ const updateKitchenOrderStatus = async (id, status, chefId) => {
       return null;
     }
 
-    // Update kitchen items too
+    // Update kitchen items and main order items
     await client.query(
       `
       UPDATE kitchen_order_items
       SET status = $1
       WHERE kitchen_order_id = $2
+      `,
+      [status, id]
+    );
+
+    await client.query(
+      `
+      UPDATE order_items
+      SET status = $1
+      WHERE id IN (
+        SELECT order_item_id FROM kitchen_order_items WHERE kitchen_order_id = $2
+      )
       `,
       [status, id]
     );

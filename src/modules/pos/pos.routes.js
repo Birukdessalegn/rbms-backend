@@ -57,6 +57,19 @@ router.post(
   posController.createOrder
 );
 
+// Staff meal orders (cashier / admin)
+router.post(
+  "/staff-orders",
+  authenticate,
+  posController.createStaffOrder
+);
+
+router.get(
+  "/staff-orders/today",
+  authenticate,
+  posController.getTodayStaffOrders
+);
+
 // Update order status
 router.put(
   "/orders/:id/status",

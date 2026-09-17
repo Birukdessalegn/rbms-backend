@@ -1945,6 +1945,286 @@ const updateOrderItem = async (orderId, orderItemId, updateData = {}, user = nul
 };
 
 // ============================================================
+// CREATE STAFF MEAL ORDER (HANDLED BY CASHIER)
+// ============================================================
+
+const createStaffOrder = async (orderData = {}, user = null) => {
+  const {
+    employeeId,
+    employeeName,
+    items = [],
+    paymentMethod = "cash",
+    notes = "",
+  } = orderData;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("Items array is required and must contain at least 1 item");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Resolve employee details
+    let resolvedEmployeeId = null;
+    let resolvedEmployeeName = employeeName || "Staff Member";
+
+    if (employeeId) {
+      const empRes = await client.query(
+        `SELECT id, first_name, last_name, department FROM employees WHERE id = $1`,
+        [employeeId]
+      );
+      if (empRes.rows.length > 0) {
+        resolvedEmployeeId = empRes.rows[0].id;
+        resolvedEmployeeName = `${empRes.rows[0].first_name} ${empRes.rows[0].last_name || ""}`.trim();
+        if (empRes.rows[0].department) {
+          resolvedEmployeeName += ` (${empRes.rows[0].department})`;
+        }
+      }
+    }
+
+    const orderNumber = `SO-${Date.now()}`;
+    const cashierId = user?.id || null;
+
+    let subtotal = 0;
+    const resolvedItems = [];
+
+    // 2. Validate items and compute staff prices
+    for (const item of items) {
+      const pId = item.productId || item.product_id || item.id;
+      const cleanPId = typeof pId === "string" && pId.includes("_")
+        ? parseInt(pId.split("_")[0], 10)
+        : parseInt(pId, 10);
+
+      const prodRes = await client.query(
+        `SELECT p.*, pc.type AS category_type, pc.name AS category_name
+         FROM products p
+         LEFT JOIN product_categories pc ON p.category_id = pc.id
+         WHERE p.id = $1`,
+        [cleanPId]
+      );
+
+      if (prodRes.rows.length === 0) {
+        throw new Error(`Product with ID ${cleanPId} not found`);
+      }
+
+      const product = prodRes.rows[0];
+
+      // Strict check: item must not be customer-only
+      if (product.menu_type === "customer") {
+        throw new Error(`"${product.name}" is marked for Customers Only and cannot be ordered for staff.`);
+      }
+
+      const quantity = Math.max(1, Number(item.quantity || 1));
+      // Staff price is used; if 0, item is free for staff
+      const unitPrice = Number(product.staff_price !== null && product.staff_price !== undefined ? product.staff_price : 0);
+      const itemTotal = Number((quantity * unitPrice).toFixed(2));
+      subtotal += itemTotal;
+
+      resolvedItems.push({
+        product,
+        quantity,
+        unitPrice,
+        itemTotal,
+        notes: item.notes || null,
+        shotsDeduction: item.shotsDeduction || null,
+      });
+    }
+
+    const total = Number(subtotal.toFixed(2));
+    const orderNotes = `Staff Meal: ${resolvedEmployeeName}${notes ? ` - ${notes}` : ""}`;
+
+    // 3. Create orders record
+    const orderRes = await client.query(
+      `INSERT INTO orders (
+        order_number,
+        order_type,
+        waiter_id,
+        subtotal,
+        discount,
+        tax,
+        total,
+        status,
+        payment_status,
+        notes
+      )
+      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'completed', $5, $6)
+      RETURNING *`,
+      [
+        orderNumber,
+        cashierId,
+        total,
+        total,
+        total > 0 ? "paid" : "free",
+        orderNotes,
+      ]
+    );
+    const createdOrder = orderRes.rows[0];
+
+    // 4. Record payment if paid
+    if (total > 0) {
+      await client.query(
+        `INSERT INTO payments (
+          order_id,
+          amount,
+          payment_method,
+          reference,
+          status,
+          paid_at,
+          notes
+        )
+        VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP, $5)`,
+        [
+          createdOrder.id,
+          total,
+          paymentMethod || "cash",
+          `STAFF-PAY-${Date.now()}`,
+          `Paid staff meal by ${resolvedEmployeeName}`,
+        ]
+      );
+    }
+
+    // 5. Create order_items and dispatch to kitchen/bar
+    const kitchenItems = [];
+    const barItems = [];
+
+    for (const ri of resolvedItems) {
+      const oiRes = await client.query(
+        `INSERT INTO order_items (
+          order_id,
+          product_id,
+          quantity,
+          unit_price,
+          total,
+          notes,
+          status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+        RETURNING *`,
+        [
+          createdOrder.id,
+          ri.product.id,
+          ri.quantity,
+          ri.unitPrice,
+          ri.itemTotal,
+          ri.notes,
+        ]
+      );
+      const createdItem = oiRes.rows[0];
+
+      const targetDept = resolveTargetDepartment(ri.product);
+      if (targetDept === "kitchen") {
+        kitchenItems.push(createdItem);
+      } else if (targetDept === "bar") {
+        barItems.push(createdItem);
+      }
+
+      // Deduct stock from department inventory
+      await adjustDepartmentStock(
+        client,
+        ri.product,
+        ri.quantity,
+        targetDept,
+        createdOrder.id,
+        createdOrder.order_number,
+        user?.id,
+        false,
+        `Staff Meal - ${resolvedEmployeeName}`,
+        ri.shotsDeduction
+      );
+    }
+
+    // Dispatch Kitchen Order with [STAFF MEAL] tag
+    if (kitchenItems.length > 0) {
+      const koRes = await client.query(
+        `INSERT INTO kitchen_orders (order_id, notes, status)
+         VALUES ($1, $2, 'pending')
+         RETURNING id`,
+        [createdOrder.id, `[STAFF MEAL: ${resolvedEmployeeName}]`]
+      );
+      const kitchenOrderId = koRes.rows[0].id;
+      for (const ki of kitchenItems) {
+        await client.query(
+          `INSERT INTO kitchen_order_items (kitchen_order_id, order_item_id, quantity, status)
+           VALUES ($1, $2, $3, 'pending')`,
+          [kitchenOrderId, ki.id, ki.quantity]
+        );
+      }
+    }
+
+    // Dispatch Bar Order with [STAFF MEAL] tag
+    if (barItems.length > 0) {
+      const boRes = await client.query(
+        `INSERT INTO bar_orders (order_id, notes, status)
+         VALUES ($1, $2, 'pending')
+         RETURNING id`,
+        [createdOrder.id, `[STAFF MEAL: ${resolvedEmployeeName}]`]
+      );
+      const barOrderId = boRes.rows[0].id;
+      for (const bi of barItems) {
+        await client.query(
+          `INSERT INTO bar_order_items (bar_order_id, order_item_id, quantity, status)
+           VALUES ($1, $2, $3, 'pending')`,
+          [barOrderId, bi.id, bi.quantity]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return await getOrderById(createdOrder.id);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
+// GET TODAY'S STAFF ORDERS (AUDIT & HISTORY)
+// ============================================================
+
+const getTodayStaffOrders = async () => {
+  const result = await pool.query(
+    `SELECT 
+       o.id,
+       o.order_number,
+       o.subtotal,
+       o.total,
+       o.status,
+       o.payment_status,
+       o.notes,
+       o.created_at,
+       u.username AS cashier_name,
+       COALESCE(
+         (
+           SELECT JSON_AGG(
+             JSON_BUILD_OBJECT(
+               'id', oi.id,
+               'product_id', oi.product_id,
+               'product_name', p.name,
+               'quantity', oi.quantity,
+               'unit_price', oi.unit_price,
+               'total', oi.total,
+               'notes', oi.notes
+             )
+           )
+           FROM order_items oi
+           JOIN products p ON oi.product_id = p.id
+           WHERE oi.order_id = o.id
+         ),
+         '[]'::json
+       ) AS items
+     FROM orders o
+     LEFT JOIN users u ON o.waiter_id = u.id
+     WHERE o.order_type = 'staff'
+     ORDER BY o.created_at DESC
+     LIMIT 100`
+  );
+  return result.rows;
+};
+
+// ============================================================
 // EXPORTS
 // ============================================================
 
@@ -1952,6 +2232,8 @@ module.exports = {
   getAllOrders,
   getOrderById,
   createOrder,
+  createStaffOrder,
+  getTodayStaffOrders,
   updateOrderStatus,
   addOrderItems,
   removeOrderItem,
@@ -1964,3 +2246,4 @@ module.exports = {
   updateTableStatus,
   deleteTable,
 };
+

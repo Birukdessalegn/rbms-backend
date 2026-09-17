@@ -475,10 +475,53 @@ const updateOrderItem = async (req, res) => {
   }
 };
 
+// ============================================================
+// CREATE STAFF MEAL ORDER (CASHIER / ADMIN)
+// ============================================================
+
+const createStaffOrder = async (req, res) => {
+  try {
+    const order = await posService.createStaffOrder(req.body, req.user);
+    res.status(201).json({
+      success: true,
+      message: "Staff meal order placed successfully",
+      order,
+    });
+  } catch (error) {
+    console.error("Create staff order error:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to create staff meal order",
+    });
+  }
+};
+
+// ============================================================
+// GET TODAY'S STAFF MEAL ORDERS
+// ============================================================
+
+const getTodayStaffOrders = async (req, res) => {
+  try {
+    const orders = await posService.getTodayStaffOrders();
+    res.json({
+      success: true,
+      orders,
+    });
+  } catch (error) {
+    console.error("Get today's staff orders error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch staff meal orders",
+    });
+  }
+};
+
 module.exports = {
   getOrders,
   getOrder,
   createOrder,
+  createStaffOrder,
+  getTodayStaffOrders,
   updateOrderStatus,
   addOrderItems,
   removeOrderItem,
@@ -490,4 +533,4 @@ module.exports = {
   updateTable,
   updateTableStatus,
   deleteTable,
-};
+};

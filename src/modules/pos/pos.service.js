@@ -2195,7 +2195,8 @@ const getTodayStaffOrders = async () => {
        o.payment_status,
        o.notes,
        o.created_at,
-       u.username AS cashier_name,
+       COALESCE(e.first_name || ' ' || e.last_name, 'Staff Member') AS staff_member_name,
+       d.name AS staff_department,
        COALESCE(
          (
            SELECT JSON_AGG(
@@ -2216,7 +2217,8 @@ const getTodayStaffOrders = async () => {
          '[]'::json
        ) AS items
      FROM orders o
-     LEFT JOIN users u ON o.waiter_id = u.id
+     LEFT JOIN employees e ON o.waiter_id = e.id
+     LEFT JOIN departments d ON e.department_id = d.id
      WHERE o.order_type = 'staff'
      ORDER BY o.created_at DESC
      LIMIT 100`

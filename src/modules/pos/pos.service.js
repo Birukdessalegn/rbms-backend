@@ -1470,7 +1470,8 @@ const adjustDepartmentStock = async (
   orderNumber,
   userId,
   isRestore = false,
-  reason = ""
+  reason = "",
+  shotsDeduction = null
 ) => {
   if (!targetDepartment) return;
 
@@ -1491,6 +1492,11 @@ const adjustDepartmentStock = async (
       const ratio = Number(product.portion_ratio || 1.0);
       effectiveQty = Number((quantity * ratio).toFixed(4));
     }
+  } else if (shotsDeduction) {
+    const bottleCapacity = Number(product.shots_capacity) > 0 ? Number(product.shots_capacity) : 30;
+    const ratio = Number(shotsDeduction) / bottleCapacity;
+    effectiveQty = Number((quantity * ratio).toFixed(4));
+    stockUnit = "bottle (portions)";
   }
 
   const delta = isRestore ? effectiveQty : -effectiveQty;
@@ -1583,9 +1589,10 @@ const addOrderItems = async (orderId, newItems = [], user = null) => {
   try {
     await client.query("BEGIN");
 
+    const cleanOrderId = String(orderId).replace(/^#/, "").trim();
     const orderRes = await client.query(
-      `SELECT * FROM orders WHERE id::text = $1 OR order_number = $1 FOR UPDATE`,
-      [String(orderId).trim()]
+      `SELECT * FROM orders WHERE id::text = $1 OR order_number = $1 OR order_number = $2 OR ('#' || order_number) = $1 FOR UPDATE`,
+      [String(orderId).trim(), cleanOrderId]
     );
     if (orderRes.rows.length === 0) {
       throw new Error("Order not found");
@@ -1649,7 +1656,9 @@ const addOrderItems = async (orderId, newItems = [], user = null) => {
         order.id,
         order.order_number,
         user?.id,
-        false
+        false,
+        "",
+        item.shotsDeduction || item.shots
       );
     }
 
@@ -1721,13 +1730,14 @@ const removeOrderItem = async (orderId, orderItemId, options = {}, user = null) 
   try {
     await client.query("BEGIN");
 
+    const cleanOrderId = String(orderId).replace(/^#/, "").trim();
     const itemRes = await client.query(
       `SELECT oi.*, o.status AS order_status, o.payment_status, o.order_number
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2)
+       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2 OR o.order_number = $3 OR ('#' || o.order_number) = $2)
        FOR UPDATE OF oi`,
-      [Number(orderItemId), String(orderId).trim()]
+      [Number(orderItemId), String(orderId).trim(), cleanOrderId]
     );
     if (itemRes.rows.length === 0) {
       throw new Error("Order item not found on this order");
@@ -1795,13 +1805,14 @@ const updateOrderItem = async (orderId, orderItemId, updateData = {}, user = nul
   try {
     await client.query("BEGIN");
 
+    const cleanOrderId = String(orderId).replace(/^#/, "").trim();
     const itemRes = await client.query(
       `SELECT oi.*, o.status AS order_status, o.payment_status, o.order_number
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2)
+       WHERE oi.id = $1 AND (o.id::text = $2 OR o.order_number = $2 OR o.order_number = $3 OR ('#' || o.order_number) = $2)
        FOR UPDATE OF oi`,
-      [Number(orderItemId), String(orderId).trim()]
+      [Number(orderItemId), String(orderId).trim(), cleanOrderId]
     );
     if (itemRes.rows.length === 0) {
       throw new Error("Order item not found on this order");

@@ -430,7 +430,7 @@ const addOrderItems = async (req, res) => {
 const removeOrderItem = async (req, res) => {
   try {
     const { id: orderId, itemId } = req.params;
-    const { reason } = req.body;
+    const { reason } = req.body || {};
 
     const updatedOrder = await posService.removeOrderItem(orderId, itemId, { reason }, req.user);
 
@@ -456,7 +456,7 @@ const removeOrderItem = async (req, res) => {
 const updateOrderItem = async (req, res) => {
   try {
     const { id: orderId, itemId } = req.params;
-    const { quantity, notes } = req.body;
+    const { quantity, notes } = req.body || {};
 
     const updatedOrder = await posService.updateOrderItem(orderId, itemId, { quantity, notes }, req.user);
 

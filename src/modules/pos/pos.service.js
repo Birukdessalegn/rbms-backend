@@ -2032,9 +2032,9 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     }
 
     const total = Number(subtotal.toFixed(2));
-    const orderNotes = `Staff Meal: ${resolvedEmployeeName}${notes ? ` - ${notes}` : ""}`;
+    const orderNotes = `Staff Meal: ${resolvedEmployeeName}`;
 
-    // 3. Create orders record
+    // 3. Create orders record (waiter_id references employees.id)
     const orderRes = await client.query(
       `INSERT INTO orders (
         order_number,
@@ -2048,14 +2048,13 @@ const createStaffOrder = async (orderData = {}, user = null) => {
         payment_status,
         notes
       )
-      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'completed', $5, $6)
+      VALUES ($1, 'staff', $2, $3, 0, 0, $4, 'completed', 'paid', $5)
       RETURNING *`,
       [
         orderNumber,
-        cashierId,
+        resolvedEmployeeId,
         total,
         total,
-        total > 0 ? "paid" : "free",
         orderNotes,
       ]
     );
@@ -2070,16 +2069,14 @@ const createStaffOrder = async (orderData = {}, user = null) => {
           payment_method,
           reference,
           status,
-          paid_at,
-          notes
+          paid_at
         )
-        VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP, $5)`,
+        VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP)`,
         [
           createdOrder.id,
           total,
           paymentMethod || "cash",
           `STAFF-PAY-${Date.now()}`,
-          `Paid staff meal by ${resolvedEmployeeName}`,
         ]
       );
     }

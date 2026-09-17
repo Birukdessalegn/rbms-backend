@@ -797,17 +797,16 @@ const createOrder = async (order) => {
     // ============================================================
 
     const calculatedDiscount = Number(discount || 0);
-    let calculatedTax = Number(tax || 0);
 
-    // If tax is not provided or is 0, auto-calculate 15% VAT + 10% Service Charge (25% total fees)
-    if (calculatedTax === 0) {
-      const vat = Number((calculatedSubtotal * 0.15).toFixed(2));
-      const serviceCharge = Number((calculatedSubtotal * 0.10).toFixed(2));
-      calculatedTax = Number((vat + serviceCharge).toFixed(2));
-    }
-
+    // Product prices in database are customer menu prices (inclusive of 15% VAT)
+    // Total is the registered product price sum minus any discount - no extra tax added on top
     const calculatedTotal = Number(
-      (calculatedSubtotal - calculatedDiscount + calculatedTax).toFixed(2)
+      Math.max(calculatedSubtotal - calculatedDiscount, 0).toFixed(2)
+    );
+
+    // 15% VAT included in customer menu price (Ethiopian standard: Price - Price / 1.15)
+    const calculatedTax = Number(
+      (calculatedTotal - (calculatedTotal / 1.15)).toFixed(2)
     );
 
     const updatedOrderResult = await client.query(
@@ -1556,13 +1555,12 @@ const recalculateOrderTotals = async (client, orderId) => {
     [orderId]
   );
   const subtotal = Number(parseFloat(subtotalRes.rows[0].subtotal || 0).toFixed(2));
-  const vat = Number((subtotal * 0.15).toFixed(2));
-  const serviceCharge = Number((subtotal * 0.10).toFixed(2));
-  const tax = Number((vat + serviceCharge).toFixed(2));
-
   const orderCheck = await client.query(`SELECT discount FROM orders WHERE id = $1`, [orderId]);
   const discount = Number(orderCheck.rows[0]?.discount || 0);
-  const total = Number(Math.max(0, subtotal - discount + tax).toFixed(2));
+  const total = Number(Math.max(0, subtotal - discount).toFixed(2));
+
+  // 15% VAT included in customer menu price (Ethiopian standard: Price - Price / 1.15)
+  const tax = Number((total - (total / 1.15)).toFixed(2));
 
   await client.query(
     `UPDATE orders

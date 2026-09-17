@@ -1557,23 +1557,62 @@ const adjustDepartmentStock = async (
 
 const recalculateOrderTotals = async (client, orderId) => {
   const subtotalRes = await client.query(
-    `SELECT COALESCE(SUM(total), 0) AS subtotal FROM order_items WHERE order_id = $1 AND status != 'cancelled'`,
+    `SELECT COALESCE(SUM(total), 0) AS subtotal, COUNT(*) AS active_count 
+     FROM order_items WHERE order_id = $1 AND status != 'cancelled'`,
     [orderId]
   );
   const subtotal = Number(parseFloat(subtotalRes.rows[0].subtotal || 0).toFixed(2));
-  const orderCheck = await client.query(`SELECT discount FROM orders WHERE id = $1`, [orderId]);
-  const discount = Number(orderCheck.rows[0]?.discount || 0);
+  const activeCount = parseInt(subtotalRes.rows[0]?.active_count || 0, 10);
+  const orderCheck = await client.query(`SELECT table_id, discount, status FROM orders WHERE id = $1`, [orderId]);
+  const orderData = orderCheck.rows[0];
+  const discount = Number(orderData?.discount || 0);
   const total = Number(Math.max(0, subtotal - discount).toFixed(2));
 
   // 15% VAT included in customer menu price (Ethiopian standard: Price - Price / 1.15)
   const tax = Number((total - (total / 1.15)).toFixed(2));
 
-  await client.query(
-    `UPDATE orders
-     SET subtotal = $1, tax = $2, total = $3, updated_at = CURRENT_TIMESTAMP
-     WHERE id = $4`,
-    [subtotal, tax, total, orderId]
-  );
+  if (activeCount === 0) {
+    // All items removed: cancel order, kitchen/bar tickets, and free table
+    await client.query(
+      `UPDATE orders
+       SET subtotal = 0, tax = 0, total = 0, status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [orderId]
+    );
+
+    await client.query(
+      `UPDATE kitchen_orders SET status = 'cancelled' WHERE order_id = $1 AND status != 'served'`,
+      [orderId]
+    );
+    await client.query(
+      `UPDATE bar_orders SET status = 'cancelled' WHERE order_id = $1 AND status != 'served'`,
+      [orderId]
+    );
+
+    if (orderData?.table_id) {
+      const otherOrders = await client.query(
+        `SELECT id FROM orders 
+         WHERE table_id = $1 AND id != $2 AND status NOT IN ('completed', 'cancelled')
+         LIMIT 1`,
+        [orderData.table_id, orderId]
+      );
+      if (otherOrders.rows.length === 0) {
+        await client.query(
+          `UPDATE restaurant_tables 
+           SET status = 'available', current_waiter_id = NULL 
+           WHERE id = $1`,
+          [orderData.table_id]
+        );
+      }
+    }
+  } else {
+    await client.query(
+      `UPDATE orders
+       SET subtotal = $1, tax = $2, total = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [subtotal, tax, total, orderId]
+    );
+  }
 };
 
 // ============================================================

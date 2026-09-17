@@ -110,10 +110,10 @@ const getAllOrders = async () => {
       ON o.table_id = rt.id
 
     LEFT JOIN employees e
-      ON o.waiter_id = e.id
+      ON (o.waiter_id = e.id OR o.waiter_id = e.user_id)
 
     LEFT JOIN users u
-      ON e.user_id = u.id
+      ON (e.user_id = u.id OR o.waiter_id = u.id)
 
     LEFT JOIN employees eb
       ON o.bartender_id = eb.id
@@ -262,10 +262,10 @@ const getOrderById = async (id) => {
       ON o.table_id = rt.id
 
     LEFT JOIN employees e
-      ON o.waiter_id = e.id
+      ON (o.waiter_id = e.id OR o.waiter_id = e.user_id)
 
     LEFT JOIN users u
-      ON e.user_id = u.id
+      ON (e.user_id = u.id OR o.waiter_id = u.id)
 
     LEFT JOIN employees eb
       ON o.bartender_id = eb.id
@@ -384,7 +384,7 @@ const createOrder = async (order) => {
 
 
     // ============================================================
-    // FIND EMPLOYEE USING LOGGED-IN USER ID
+    // FIND EMPLOYEE USING LOGGED-IN USER ID OR DIRECT EMPLOYEE ID
     // ============================================================
 
     let employeeId = null;
@@ -399,7 +399,7 @@ const createOrder = async (order) => {
           role_id,
           user_id
         FROM employees
-        WHERE user_id = $1
+        WHERE user_id = $1 OR id = $1
         LIMIT 1
         `,
         [waiterId]
@@ -407,6 +407,24 @@ const createOrder = async (order) => {
 
       if (employeeResult.rows.length > 0) {
         employeeId = employeeResult.rows[0].id;
+      } else if (Number.isInteger(Number(waiterId)) && Number(waiterId) > 0) {
+        employeeId = Number(waiterId);
+      }
+    }
+
+    // Fallback to order.user if employeeId was not resolved from waiterId
+    if (!employeeId && order.user) {
+      const fallbackUserId = order.user.employee_id || order.user.employeeId || order.user.id || order.user.user_id;
+      if (fallbackUserId) {
+        const empRes = await client.query(
+          `SELECT id FROM employees WHERE user_id = $1 OR id = $1 LIMIT 1`,
+          [fallbackUserId]
+        );
+        if (empRes.rows.length > 0) {
+          employeeId = empRes.rows[0].id;
+        } else if (Number.isInteger(Number(fallbackUserId)) && Number(fallbackUserId) > 0) {
+          employeeId = Number(fallbackUserId);
+        }
       }
     }
 

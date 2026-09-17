@@ -47,10 +47,10 @@ o.payment_status,
       ON ko.chef_id = e.id
 
     LEFT JOIN employees ew
-      ON o.waiter_id = ew.id
+      ON (o.waiter_id = ew.id OR o.waiter_id = ew.user_id)
 
     LEFT JOIN users uw
-      ON ew.user_id = uw.id
+      ON (ew.user_id = uw.id OR o.waiter_id = uw.id)
 
     ORDER BY ko.created_at DESC
   `);

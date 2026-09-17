@@ -1030,7 +1030,41 @@ const updateOrderStatus = async (id, status) => {
     [status, String(id).trim()]
   );
 
-  return result.rows[0] || null;
+  const updatedOrder = result.rows[0];
+
+  if (updatedOrder) {
+    // Synchronize order items
+    await pool.query(
+      `UPDATE order_items SET status = $1 WHERE order_id = $2`,
+      [status, updatedOrder.id]
+    );
+
+    // Synchronize kitchen orders & items
+    await pool.query(
+      `UPDATE kitchen_orders SET status = $1 WHERE order_id = $2`,
+      [status, updatedOrder.id]
+    );
+    await pool.query(
+      `UPDATE kitchen_order_items SET status = $1 WHERE kitchen_order_id IN (
+        SELECT id FROM kitchen_orders WHERE order_id = $2
+      )`,
+      [status, updatedOrder.id]
+    );
+
+    // Synchronize bar orders & items
+    await pool.query(
+      `UPDATE bar_orders SET status = $1 WHERE order_id = $2`,
+      [status, updatedOrder.id]
+    );
+    await pool.query(
+      `UPDATE bar_order_items SET status = $1 WHERE bar_order_id IN (
+        SELECT id FROM bar_orders WHERE order_id = $2
+      )`,
+      [status, updatedOrder.id]
+    );
+  }
+
+  return updatedOrder || null;
 };
 
 

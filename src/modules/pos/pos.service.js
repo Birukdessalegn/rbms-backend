@@ -1971,7 +1971,10 @@ const createStaffOrder = async (orderData = {}, user = null) => {
 
     if (employeeId) {
       const empRes = await client.query(
-        `SELECT id, first_name, last_name, department FROM employees WHERE id = $1`,
+        `SELECT e.id, e.first_name, e.last_name, d.name AS department
+         FROM employees e
+         LEFT JOIN departments d ON e.department_id = d.id
+         WHERE e.id = $1`,
         [employeeId]
       );
       if (empRes.rows.length > 0) {

@@ -589,6 +589,261 @@ const verifyKitchenStock = async ({
   }
 };
 
+// ============================================================
+// F&B STOCK SHORTAGE / DISCREPANCY AUDIT & APPROVAL
+// ============================================================
+
+const createShortageRequest = async ({
+  productId,
+  department = "kitchen",
+  expectedQuantity,
+  physicalCount,
+  reason,
+  notes,
+  userId,
+  requesterName,
+}) => {
+  if (!productId) {
+    throw new Error("Product ID is required for shortage report.");
+  }
+
+  const exp = Number(expectedQuantity || 0);
+  const act = Number(physicalCount || 0);
+  const shortageQty = exp - act;
+
+  if (shortageQty <= 0) {
+    throw new Error("Physical count must be less than recorded stock to report a shortage.");
+  }
+
+  // 1. Fetch product details
+  const prodRes = await pool.query(
+    `SELECT id, name, unit, COALESCE(cost_price, price, 0) AS unit_cost FROM products WHERE id = $1`,
+    [productId]
+  );
+  if (prodRes.rows.length === 0) {
+    throw new Error(`Product #${productId} not found.`);
+  }
+  const product = prodRes.rows[0];
+  const unitCost = Number(product.unit_cost || 0);
+  const totalLoss = Number((shortageQty * unitCost).toFixed(2));
+
+  // 2. Resolve requester name
+  let finalRequester = requesterName;
+  if (!finalRequester && userId) {
+    const userRes = await pool.query(
+      `
+      SELECT u.username, e.first_name, e.last_name
+      FROM users u
+      LEFT JOIN employees e ON e.user_id = u.id
+      WHERE u.id = $1
+      `,
+      [userId]
+    );
+    if (userRes.rows.length > 0) {
+      const u = userRes.rows[0];
+      finalRequester = (u.first_name && u.last_name) ? `${u.first_name} ${u.last_name}` : u.username;
+    }
+  }
+
+  const insertRes = await pool.query(
+    `
+    INSERT INTO stock_shortage_requests (
+      product_id,
+      department,
+      expected_quantity,
+      physical_count,
+      shortage_quantity,
+      unit_cost,
+      total_loss_value,
+      reason,
+      notes,
+      status,
+      requested_by,
+      requester_name
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending_approval', $10, $11)
+    RETURNING *
+    `,
+    [
+      productId,
+      department.toLowerCase(),
+      exp,
+      act,
+      shortageQty,
+      unitCost,
+      totalLoss,
+      reason || "unaccounted_missing",
+      notes || null,
+      userId || null,
+      finalRequester || "F&B Controller",
+    ]
+  );
+
+  return insertRes.rows[0];
+};
+
+const getShortageRequests = async ({ status, department, limit = 100 } = {}) => {
+  let query = `
+    SELECT 
+      ssr.*,
+      p.name AS product_name,
+      p.product_code,
+      p.unit,
+      p.image_url,
+      pc.name AS category_name,
+      COALESCE(di.quantity, 0) AS live_inventory_stock
+    FROM stock_shortage_requests ssr
+    JOIN products p ON ssr.product_id = p.id
+    LEFT JOIN product_categories pc ON p.category_id = pc.id
+    LEFT JOIN department_inventory di ON di.product_id = p.id AND di.department = ssr.department
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (status && status !== "all") {
+    params.push(status);
+    query += ` AND ssr.status = $${params.length}`;
+  }
+
+  if (department && department !== "all") {
+    params.push(department.toLowerCase());
+    query += ` AND ssr.department = $${params.length}`;
+  }
+
+  query += ` ORDER BY ssr.created_at DESC`;
+
+  if (limit) {
+    params.push(limit);
+    query += ` LIMIT $${params.length}`;
+  }
+
+  const result = await pool.query(query, params);
+  return result.rows;
+};
+
+const reviewShortageRequest = async ({
+  requestId,
+  action, // 'approve' | 'reject'
+  reviewNotes,
+  userId,
+  reviewerName,
+}) => {
+  if (!requestId) {
+    throw new Error("Shortage request ID is required.");
+  }
+  if (!["approve", "reject"].includes(action)) {
+    throw new Error("Action must be either 'approve' or 'reject'.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const reqRes = await client.query(
+      `SELECT * FROM stock_shortage_requests WHERE id = $1 FOR UPDATE`,
+      [requestId]
+    );
+    if (reqRes.rows.length === 0) {
+      throw new Error(`Shortage request #${requestId} not found.`);
+    }
+
+    const shortage = reqRes.rows[0];
+    if (shortage.status !== "pending_approval") {
+      throw new Error(`This shortage request has already been ${shortage.status}.`);
+    }
+
+    // Resolve reviewer name
+    let finalReviewer = reviewerName;
+    if (!finalReviewer && userId) {
+      const userRes = await client.query(
+        `
+        SELECT u.username, e.first_name, e.last_name
+        FROM users u
+        LEFT JOIN employees e ON e.user_id = u.id
+        WHERE u.id = $1
+        `,
+        [userId]
+      );
+      if (userRes.rows.length > 0) {
+        const u = userRes.rows[0];
+        finalReviewer = (u.first_name && u.last_name) ? `${u.first_name} ${u.last_name}` : u.username;
+      }
+    }
+
+    const newStatus = action === "approve" ? "approved" : "rejected";
+
+    if (action === "approve") {
+      // 1. Update sub-store inventory to the physical count
+      await client.query(
+        `
+        INSERT INTO department_inventory (department, product_id, quantity, updated_at)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+        ON CONFLICT (department, product_id)
+        DO UPDATE SET quantity = $3, updated_at = CURRENT_TIMESTAMP
+        `,
+        [shortage.department, shortage.product_id, shortage.physical_count]
+      );
+
+      // 2. Record official inventory transaction
+      await client.query(
+        `
+        INSERT INTO department_inventory_transactions (
+          department,
+          product_id,
+          transaction_type,
+          quantity,
+          reference_type,
+          reference_id,
+          notes,
+          created_by
+        )
+        VALUES ($1, $2, 'shortage_writeoff', $3, 'shortage_request', $4, $5, $6)
+        `,
+        [
+          shortage.department,
+          shortage.product_id,
+          -Number(shortage.shortage_quantity),
+          shortage.id,
+          `Manager approved shortage write-off: -${shortage.shortage_quantity} (${reviewNotes || shortage.reason})`,
+          userId || null,
+        ]
+      );
+    }
+
+    // 3. Update shortage request status
+    const updateRes = await client.query(
+      `
+      UPDATE stock_shortage_requests
+      SET 
+        status = $1,
+        reviewed_by = $2,
+        reviewer_name = $3,
+        review_notes = $4,
+        reviewed_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING *
+      `,
+      [
+        newStatus,
+        userId || null,
+        finalReviewer || "Manager / Admin",
+        reviewNotes || null,
+        requestId,
+      ]
+    );
+
+    await client.query("COMMIT");
+    return updateRes.rows[0];
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAllKitchenOrders,
   getKitchenOrderById,
@@ -597,4 +852,7 @@ module.exports = {
   deleteKitchenOrder,
   getKitchenAudits,
   verifyKitchenStock,
+  createShortageRequest,
+  getShortageRequests,
+  reviewShortageRequest,
 };

@@ -284,6 +284,32 @@ const initializeDatabase = async () => {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_end_time TIME DEFAULT '07:00';
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_hours NUMERIC(4,2) DEFAULT 8.00;
 
+      -- F&B Stock Shortage & Discrepancy Audit Requests
+      CREATE TABLE IF NOT EXISTS stock_shortage_requests (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        department VARCHAR(50) NOT NULL,
+        expected_quantity NUMERIC(12,3) NOT NULL,
+        physical_count NUMERIC(12,3) NOT NULL,
+        shortage_quantity NUMERIC(12,3) NOT NULL,
+        unit_cost NUMERIC(12,2) DEFAULT 0.00,
+        total_loss_value NUMERIC(12,2) DEFAULT 0.00,
+        reason VARCHAR(100) NOT NULL,
+        notes TEXT,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending_approval',
+        requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        requester_name VARCHAR(150),
+        reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        reviewer_name VARCHAR(150),
+        review_notes TEXT,
+        reviewed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_shortage_status ON stock_shortage_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_shortage_dept ON stock_shortage_requests(department);
+      CREATE INDEX IF NOT EXISTS idx_shortage_created ON stock_shortage_requests(created_at DESC);
+
       -- Ensure cPanel user ambbatxv has full rights if role exists
       DO $$
       BEGIN

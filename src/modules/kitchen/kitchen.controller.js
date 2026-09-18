@@ -276,6 +276,102 @@ const verifyKitchenStock = async (req, res) => {
   }
 };
 
+// ============================================================
+// SHORTAGE DISCREPANCY AUDIT & REVIEW CONTROLLERS
+// ============================================================
+
+const createShortageRequest = async (req, res) => {
+  try {
+    const {
+      productId,
+      department,
+      expectedQuantity,
+      physicalCount,
+      reason,
+      notes,
+    } = req.body;
+
+    const shortage = await kitchenService.createShortageRequest({
+      productId,
+      department,
+      expectedQuantity,
+      physicalCount,
+      reason,
+      notes,
+      userId: req.user?.id,
+      requesterName: req.user?.username,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Stock shortage reported successfully and submitted for manager approval.",
+      shortage,
+    });
+  } catch (error) {
+    console.error("Create shortage request error:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to submit shortage report.",
+    });
+  }
+};
+
+const getShortageRequests = async (req, res) => {
+  try {
+    const { status, department, limit } = req.query;
+    const shortages = await kitchenService.getShortageRequests({
+      status,
+      department,
+      limit: limit ? Number(limit) : 100,
+    });
+
+    res.json({
+      success: true,
+      shortages,
+    });
+  } catch (error) {
+    console.error("Get shortage requests error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch shortage requests.",
+    });
+  }
+};
+
+const reviewShortageRequest = async (req, res) => {
+  try {
+    const role = (req.user?.role || req.user?.role_name || "").toLowerCase();
+    // Verify Manager / Admin authority if user role is present
+    if (role && !["admin", "manager"].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: Only a Manager or Admin can approve or reject stock shortage write-offs.",
+      });
+    }
+
+    const { action, reviewNotes } = req.body;
+    const reviewedShortage = await kitchenService.reviewShortageRequest({
+      requestId: req.params.id,
+      action,
+      reviewNotes,
+      userId: req.user?.id,
+      reviewerName: req.user?.username,
+    });
+
+    res.json({
+      success: true,
+      message: `Stock shortage request has been ${reviewedShortage.status}.`,
+      shortage: reviewedShortage,
+    });
+  } catch (error) {
+    console.error("Review shortage request error:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to review shortage request.",
+    });
+  }
+};
+
 module.exports = {
   getKitchenOrders,
   getKitchenOrder,
@@ -284,4 +380,7 @@ module.exports = {
   deleteKitchenOrder,
   getKitchenAudits,
   verifyKitchenStock,
+  createShortageRequest,
+  getShortageRequests,
+  reviewShortageRequest,
 };

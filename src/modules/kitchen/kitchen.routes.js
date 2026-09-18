@@ -14,9 +14,14 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-// Kitchen stock audit & verification endpoints
+// Kitchen & Bar stock audit & verification endpoints
 router.get("/audits", optionalAuth, kitchenController.getKitchenAudits);
 router.post("/audit", optionalAuth, kitchenController.verifyKitchenStock);
+
+// F&B Stock shortage & discrepancy requests (all outlets: kitchen, bar, fruit)
+router.get("/shortages", optionalAuth, kitchenController.getShortageRequests);
+router.post("/shortages", optionalAuth, kitchenController.createShortageRequest);
+router.put("/shortages/:id/review", optionalAuth, kitchenController.reviewShortageRequest);
 
 // Get all kitchen orders (support both / and /orders)
 router.get("/", kitchenController.getKitchenOrders);

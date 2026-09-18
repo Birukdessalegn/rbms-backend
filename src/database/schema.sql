@@ -1370,7 +1370,38 @@ CREATE INDEX IF NOT EXISTS idx_payroll_items_emp ON payroll_items(employee_id);
 
 
 -- ============================================================
+-- F&B STOCK SHORTAGE & DISCREPANCY AUDIT REQUESTS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stock_shortage_requests (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    department VARCHAR(50) NOT NULL, -- 'kitchen', 'bar', 'fruit'
+    expected_quantity NUMERIC(12,3) NOT NULL,
+    physical_count NUMERIC(12,3) NOT NULL,
+    shortage_quantity NUMERIC(12,3) NOT NULL,
+    unit_cost NUMERIC(12,2) DEFAULT 0.00,
+    total_loss_value NUMERIC(12,2) DEFAULT 0.00,
+    reason VARCHAR(100) NOT NULL, -- 'breakage_spillage', 'unaccounted_missing', 'kitchen_waste', 'expired', 'other'
+    notes TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'pending_approval', -- 'pending_approval', 'approved', 'rejected'
+    requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    requester_name VARCHAR(150),
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    reviewer_name VARCHAR(150),
+    review_notes TEXT,
+    reviewed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_shortage_status ON stock_shortage_requests(status);
+CREATE INDEX IF NOT EXISTS idx_shortage_dept ON stock_shortage_requests(department);
+CREATE INDEX IF NOT EXISTS idx_shortage_created ON stock_shortage_requests(created_at DESC);
+
+
+-- ============================================================
 -- FINISHED
 -- ============================================================
+
 
 SELECT 'RBMS database schema created successfully!' AS message;

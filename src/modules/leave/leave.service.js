@@ -194,10 +194,24 @@ const rejectLeaveRequest = async (id, reviewedBy, managerComment) => {
 };
 
 
+// ============================================================
+// GET LEAVE TYPES
+// ============================================================
+
+const getLeaveTypes = async () => {
+  const result = await pool.query(`
+    SELECT id, name, description, max_days
+    FROM leave_types
+    ORDER BY id ASC
+  `);
+  return result.rows;
+};
+
 module.exports = {
   getAllLeaveRequests,
   getLeaveRequestById,
   createLeaveRequest,
   approveLeaveRequest,
   rejectLeaveRequest,
+  getLeaveTypes,
 };

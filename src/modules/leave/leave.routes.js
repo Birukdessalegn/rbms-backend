@@ -7,6 +7,9 @@ const leaveController = require("./leave.controller");
 // Get all leave requests
 router.get("/", leaveController.getLeaveRequests);
 
+// Get leave types
+router.get("/types", leaveController.getLeaveTypes);
+
 // Get one leave request
 router.get("/:id", leaveController.getLeaveRequest);
 

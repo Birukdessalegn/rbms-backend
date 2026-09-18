@@ -111,10 +111,11 @@ const approveLeaveRequest = async (req, res) => {
       managerComment,
     } = req.body;
 
+    const reviewer = reviewedBy || req.user?.id || null;
     const leaveRequest =
       await leaveService.approveLeaveRequest(
         req.params.id,
-        reviewedBy,
+        reviewer,
         managerComment
       );
 
@@ -160,10 +161,11 @@ const rejectLeaveRequest = async (req, res) => {
       });
     }
 
+    const reviewer = reviewedBy || req.user?.id || null;
     const leaveRequest =
       await leaveService.rejectLeaveRequest(
         req.params.id,
-        reviewedBy,
+        reviewer,
         managerComment
       );
 
@@ -191,10 +193,34 @@ const rejectLeaveRequest = async (req, res) => {
 };
 
 
+// ============================================================
+// GET LEAVE TYPES
+// ============================================================
+
+const getLeaveTypes = async (req, res) => {
+  try {
+    const leaveTypes = await leaveService.getLeaveTypes();
+
+    res.json({
+      success: true,
+      leaveTypes,
+    });
+  } catch (error) {
+    console.error("Get leave types error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leave types",
+    });
+  }
+};
+
+
 module.exports = {
   getLeaveRequests,
   getLeaveRequest,
   createLeaveRequest,
   approveLeaveRequest,
   rejectLeaveRequest,
+  getLeaveTypes,
 };

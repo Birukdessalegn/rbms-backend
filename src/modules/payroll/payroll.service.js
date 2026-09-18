@@ -118,7 +118,9 @@ const getPayrollSummary = async (periodMonth) => {
         d.name AS department_name,
         r.name AS position_title,
         COALESCE(att.days_present, 0) AS days_worked,
-        COALESCE(att.days_absent, 0) AS days_absent
+        COALESCE(att.days_absent, 0) AS days_absent,
+        COALESCE(lv.unpaid_leave_days, 0) AS unpaid_leave_days,
+        COALESCE(lv.paid_leave_days, 0) AS paid_leave_days
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN roles r ON e.role_id = r.id
@@ -133,6 +135,17 @@ const getPayrollSummary = async (periodMonth) => {
           AND (emp.hire_date IS NULL OR a.attendance_date >= emp.hire_date)
         GROUP BY a.employee_id
       ) att ON e.id = att.employee_id
+      LEFT JOIN (
+        SELECT 
+          lr.employee_id,
+          COALESCE(SUM(CASE WHEN LOWER(lt.name) LIKE '%unpaid%' THEN lr.total_days ELSE 0 END), 0) AS unpaid_leave_days,
+          COALESCE(SUM(CASE WHEN LOWER(lt.name) NOT LIKE '%unpaid%' THEN lr.total_days ELSE 0 END), 0) AS paid_leave_days
+        FROM leave_requests lr
+        LEFT JOIN leave_types lt ON lr.leave_type_id = lt.id
+        WHERE lr.status = 'approved'
+          AND (TO_CHAR(lr.start_date, 'YYYY-MM') = $1 OR TO_CHAR(lr.end_date, 'YYYY-MM') = $1)
+        GROUP BY lr.employee_id
+      ) lv ON e.id = lv.employee_id
       WHERE e.status = 'active'
         AND (e.hire_date IS NULL OR TO_CHAR(e.hire_date, 'YYYY-MM') <= $1)
       ORDER BY e.first_name ASC
@@ -164,14 +177,20 @@ const getPayrollSummary = async (periodMonth) => {
       // 1. Gross Salary = Effective Base + Allowances + Overtime + Bonuses
       const grossSalary = Number((effectiveBaseSalary + allowances + overtime + bonuses).toFixed(2));
 
-      // 2. Absence Deductions = (Days Absent * (Full Base Salary / 30))
-      // Note: Only absences occurring on/after hire_date were counted in SQL
+      // 2. Absence & Unpaid Leave Deductions
+      // Daily rate based on 30 standard statutory days
       const daysAbsent = Number(emp.days_absent || 0);
+      const unpaidLeaveDays = Number(emp.unpaid_leave_days || 0);
+      const paidLeaveDays = Number(emp.paid_leave_days || 0);
+
       const dailyRate = fullBaseSalary > 0 ? fullBaseSalary / 30 : 0;
       const absenceDeduction = Number((daysAbsent * dailyRate).toFixed(2));
+      // Unpaid leave days deducted from payroll; Paid leave (Annual, Sick, Maternity) incurs 0 deduction
+      const unpaidLeaveDeduction = Number((unpaidLeaveDays * dailyRate).toFixed(2));
+      const totalAbsenceDeduction = Number((absenceDeduction + unpaidLeaveDeduction).toFixed(2));
 
-      // Net earned base after unexcused absences
-      const earnedBase = Math.max(0, effectiveBaseSalary - absenceDeduction);
+      // Net earned base after unexcused absences and unpaid leave
+      const earnedBase = Math.max(0, effectiveBaseSalary - totalAbsenceDeduction);
 
       // 3. Ethiopian Statutory Pension
       // Employee Pension: 7% of basic earned salary
@@ -179,8 +198,8 @@ const getPayrollSummary = async (periodMonth) => {
       // Employer Pension: 11% of basic earned salary (company liability, not deducted from net)
       const pensionEmployer = Number((earnedBase * 0.11).toFixed(2));
 
-      // 4. Taxable Income = Gross Salary - Absence Deduction - Pension Employee (statutory exemption)
-      const taxableIncome = Math.max(0, grossSalary - absenceDeduction - pensionEmployee);
+      // 4. Taxable Income = Gross Salary - Total Absence Deduction - Pension Employee (statutory exemption)
+      const taxableIncome = Math.max(0, grossSalary - totalAbsenceDeduction - pensionEmployee);
 
       // 5. Ethiopian Personal Income Tax (Proclamation 979/2016)
       const incomeTax = calculateEthiopianIncomeTax(taxableIncome);
@@ -188,8 +207,8 @@ const getPayrollSummary = async (periodMonth) => {
       // 6. Other deductions
       const otherDeductions = 0.00;
 
-      // 7. Total Deductions = Absence Deduction + Employee Pension + Income Tax + Other Deductions
-      const totalDeductions = Number((absenceDeduction + pensionEmployee + incomeTax + otherDeductions).toFixed(2));
+      // 7. Total Deductions = Total Absence Deductions + Employee Pension + Income Tax + Other Deductions
+      const totalDeductions = Number((totalAbsenceDeduction + pensionEmployee + incomeTax + otherDeductions).toFixed(2));
 
       // 8. Net Salary = Gross Salary - Total Deductions
       const netSalary = Math.max(0, Number((grossSalary - totalDeductions).toFixed(2)));
@@ -215,7 +234,11 @@ const getPayrollSummary = async (periodMonth) => {
         gross_salary: grossSalary,
         days_worked: Number(emp.days_worked || 0),
         days_absent: daysAbsent,
-        absence_deduction: absenceDeduction,
+        absence_deduction: totalAbsenceDeduction,
+        raw_absence_deduction: absenceDeduction,
+        unpaid_leave_days: unpaidLeaveDays,
+        paid_leave_days: paidLeaveDays,
+        unpaid_leave_deduction: unpaidLeaveDeduction,
         pension_employee: pensionEmployee,
         pension_employer: pensionEmployer,
         income_tax: incomeTax,

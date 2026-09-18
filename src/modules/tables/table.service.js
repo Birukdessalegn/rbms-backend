@@ -167,35 +167,44 @@ const updateTableStatus = async (id, status, waiterId = null) => {
   if (waiterId !== null && waiterId !== undefined) {
     const isUUID =
       typeof waiterId === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(waiterId.trim());
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(waiterId).trim());
 
     if (isUUID) {
       const empRes = await pool.query(
         "SELECT id FROM employees WHERE user_id = $1 LIMIT 1",
-        [waiterId]
+        [String(waiterId).trim()]
       );
       if (empRes.rows.length > 0) {
         resolvedWaiterId = empRes.rows[0].id;
       }
     } else if (Number.isInteger(Number(waiterId)) && Number(waiterId) > 0) {
-      resolvedWaiterId = Number(waiterId);
+      const empRes = await pool.query(
+        "SELECT id FROM employees WHERE id = $1 LIMIT 1",
+        [Number(waiterId)]
+      );
+      if (empRes.rows.length > 0) {
+        resolvedWaiterId = empRes.rows[0].id;
+      }
     }
   }
+
+  const numericId = Number.isInteger(Number(id)) && Number(id) > 0 ? Number(id) : null;
+  const tableNum = String(id || "").trim();
 
   const result = await pool.query(
     `
     UPDATE restaurant_tables
     SET
-      status = $1,
+      status = $1::varchar,
       current_waiter_id = CASE
-        WHEN $1 = 'available' THEN NULL
+        WHEN $1::varchar = 'available' THEN NULL
         WHEN $2::integer IS NOT NULL THEN $2::integer
         ELSE current_waiter_id
       END
-    WHERE id = $3
+    WHERE ($3::integer IS NOT NULL AND id = $3::integer) OR table_number = $4::varchar
     RETURNING *
     `,
-    [status, resolvedWaiterId, id]
+    [status, resolvedWaiterId, numericId, tableNum]
   );
 
   return result.rows[0] || null;

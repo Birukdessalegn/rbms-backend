@@ -110,10 +110,10 @@ const getAllOrders = async () => {
       ON o.table_id = rt.id
 
     LEFT JOIN employees e
-      ON (o.waiter_id = e.id OR o.waiter_id = e.user_id)
+      ON o.waiter_id = e.id
 
     LEFT JOIN users u
-      ON (e.user_id = u.id OR o.waiter_id = u.id)
+      ON e.user_id = u.id
 
     LEFT JOIN employees eb
       ON o.bartender_id = eb.id
@@ -262,10 +262,10 @@ const getOrderById = async (id) => {
       ON o.table_id = rt.id
 
     LEFT JOIN employees e
-      ON (o.waiter_id = e.id OR o.waiter_id = e.user_id)
+      ON o.waiter_id = e.id
 
     LEFT JOIN users u
-      ON (e.user_id = u.id OR o.waiter_id = u.id)
+      ON e.user_id = u.id
 
     LEFT JOIN employees eb
       ON o.bartender_id = eb.id
@@ -477,8 +477,14 @@ const createOrder = async (order) => {
           roleName.includes("admin") ||
           roleName.includes("manager") ||
           roleName.includes("cashier") ||
-          isBartenderRole ||
-          isTableBarSeat;
+          isBartenderRole;
+
+        // Bar tables and counter seats are reserved exclusively for the Bartender
+        if (targetTable.is_bar_seat && !isBartenderRole && !isElevatedRole) {
+          throw new Error(
+            `Table ${targetTable.table_number} is a bar table reserved for the Bartender.`
+          );
+        }
 
         if (
           targetTable.status === "occupied" &&

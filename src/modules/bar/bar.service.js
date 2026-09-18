@@ -72,10 +72,10 @@ const getAllBarOrders = async () => {
       ON o.table_id = rt.id
 
     LEFT JOIN employees ew
-      ON (o.waiter_id = ew.id OR o.waiter_id = ew.user_id)
+      ON o.waiter_id = ew.id
 
     LEFT JOIN users uw
-      ON (ew.user_id = uw.id OR o.waiter_id = uw.id)
+      ON ew.user_id = uw.id
 
     LEFT JOIN employees e
       ON COALESCE(bo.bartender_id, o.bartender_id) = e.id

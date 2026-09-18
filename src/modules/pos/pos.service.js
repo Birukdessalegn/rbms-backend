@@ -62,7 +62,21 @@ const resolveTargetDepartment = (product) => {
 // GET ALL POS ORDERS
 // ============================================================
 
-const getAllOrders = async () => {
+const getAllOrders = async (waiterUserId = null) => {
+  let whereClause = "";
+  const params = [];
+
+  if (waiterUserId) {
+    const isUUID =
+      typeof waiterUserId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(waiterUserId).trim());
+
+    if (isUUID) {
+      params.push(String(waiterUserId).trim());
+      whereClause = "WHERE (e.user_id = $1 OR o.waiter_id IN (SELECT id FROM employees WHERE user_id = $1))";
+    }
+  }
+
   const result = await pool.query(`
     SELECT
       o.id,
@@ -121,8 +135,10 @@ const getAllOrders = async () => {
     LEFT JOIN users ub
       ON eb.user_id = ub.id
 
+    ${whereClause}
+
     ORDER BY o.created_at DESC
-  `);
+  `, params);
 
   const orders = result.rows;
 

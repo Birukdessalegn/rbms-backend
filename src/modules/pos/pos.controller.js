@@ -8,8 +8,11 @@ const vipCustomersService = require("../customers/vip_customers.service");
 
 const getOrders = async (req, res) => {
   try {
+    const userRole = (req.user?.role || "").toLowerCase();
+    const isWaiter = userRole === "waiter" || Number(req.user?.roleId) === 5;
+    const waiterUserId = isWaiter ? req.user?.id : null;
 
-    const orders = await posService.getAllOrders();
+    const orders = await posService.getAllOrders(waiterUserId);
 
     res.json({
       success: true,

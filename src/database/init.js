@@ -173,7 +173,8 @@ const initializeDatabase = async () => {
         ('House Keeping', 'Housekeeping and sanitation staff'),
         ('Security', 'Security and safety personnel'),
         ('Parking', 'Valet and parking attendants'),
-        ('Lift Man', 'Lift and elevator operators')
+        ('Lift Man', 'Lift and elevator operators'),
+        ('Host', 'Host, hostess, and guest reception service staff')
       ON CONFLICT (name) DO NOTHING;
     `);
 

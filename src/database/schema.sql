@@ -955,7 +955,9 @@ VALUES
     ('waiter', 'Waiter'),
     ('chef', 'Kitchen staff'),
     ('bartender', 'Bar staff'),
-    ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor')
+    ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor'),
+    ('fruit_manager', 'Fruit & Shisha Manager / Supervisor'),
+    ('fruit', 'Fruit Man / Shisha & Fruit Prep Staff')
 ON CONFLICT (name) DO NOTHING;
 
 
@@ -972,7 +974,13 @@ VALUES
     ('Bar', 'Bar staff'),
     ('Finance', 'Finance and cashier staff'),
     ('Administration', 'Administrative staff'),
-    ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit')
+    ('Food & Beverage', 'F&B Cost Control and Kitchen Inventory Audit'),
+    ('Fruit', 'Fruit Preparation, Shisha and Lounge orders'),
+    ('House Keeping', 'Housekeeping and sanitation staff'),
+    ('Security', 'Security and safety personnel'),
+    ('Parking', 'Valet and parking attendants'),
+    ('Lift Man', 'Lift and elevator operators'),
+    ('Host', 'Host, hostess, and guest reception service staff')
 ON CONFLICT (name) DO NOTHING;
 
 

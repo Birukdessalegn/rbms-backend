@@ -1078,20 +1078,164 @@ const createOrder = async (order) => {
 // UPDATE ORDER STATUS
 // ============================================================
 
-const updateOrderStatus = async (id, status) => {
-  const result = await pool.query(
-    `
-    UPDATE orders
-    SET
-      status = $1,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id::text = $2 OR order_number = $2
-    RETURNING *
-    `,
-    [status, String(id).trim()]
-  );
+const updateOrderStatus = async (id, status, userId = null, reason = "") => {
+  const cleanId = String(id).replace(/^#/, "").trim();
 
-  return result.rows[0] || null;
+  // If status is NOT cancelled, perform standard update
+  if (status !== "cancelled") {
+    const result = await pool.query(
+      `
+      UPDATE orders
+      SET
+        status = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id::text = $2 OR order_number = $2 OR order_number = $3 OR ('#' || order_number) = $2
+      RETURNING *
+      `,
+      [status, String(id).trim(), cleanId]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  // ============================================================
+  // STATUS === 'cancelled': FULL REVERSAL & STOCK RESTORATION
+  // ============================================================
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Lock and fetch order
+    const orderRes = await client.query(
+      `SELECT * FROM orders 
+       WHERE id::text = $1 OR order_number = $1 OR order_number = $2 OR ('#' || order_number) = $1
+       FOR UPDATE`,
+      [String(id).trim(), cleanId]
+    );
+
+    if (orderRes.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const order = orderRes.rows[0];
+
+    // If already cancelled, do not duplicate stock restoration
+    if (order.status === "cancelled") {
+      await client.query("COMMIT");
+      return order;
+    }
+
+    if (order.payment_status === "paid" || order.status === "completed") {
+      throw new Error("Cannot cancel a completed or settled order");
+    }
+
+    // 2. Fetch all active order items with product and category info
+    const itemsRes = await client.query(
+      `SELECT oi.*, 
+              p.id AS p_id, p.name AS p_name, p.unit AS p_unit, 
+              p.parent_product_id, p.portion_ratio, p.shots_capacity,
+              pc.type AS category_type, pc.name AS category_name
+       FROM order_items oi
+       JOIN products p ON oi.product_id = p.id
+       LEFT JOIN product_categories pc ON p.category_id = pc.id
+       WHERE oi.order_id = $1 AND (oi.status IS NULL OR oi.status != 'cancelled')`,
+      [order.id]
+    );
+
+    // 3. Restore stock for each item back to its department sub-store
+    for (const item of itemsRes.rows) {
+      const product = {
+        id: item.p_id,
+        name: item.p_name,
+        unit: item.p_unit,
+        parent_product_id: item.parent_product_id,
+        portion_ratio: item.portion_ratio,
+        shots_capacity: item.shots_capacity,
+        category_type: item.category_type,
+        category_name: item.category_name,
+      };
+
+      const targetDept = resolveTargetDepartment(product);
+
+      await adjustDepartmentStock(
+        client,
+        product,
+        item.quantity,
+        targetDept,
+        order.id,
+        order.order_number,
+        userId,
+        true, // isRestore = true!
+        reason || "Order cancelled"
+      );
+    }
+
+    // 4. Mark all order items as cancelled
+    await client.query(
+      `UPDATE order_items SET status = 'cancelled' WHERE order_id = $1`,
+      [order.id]
+    );
+
+    // 5. Cancel kitchen and bar tickets and items
+    await client.query(
+      `UPDATE kitchen_orders SET status = 'cancelled' WHERE order_id = $1 AND status != 'served'`,
+      [order.id]
+    );
+    await client.query(
+      `UPDATE kitchen_order_items SET status = 'cancelled' 
+       WHERE kitchen_order_id IN (SELECT id FROM kitchen_orders WHERE order_id = $1)`,
+      [order.id]
+    );
+    await client.query(
+      `UPDATE bar_orders SET status = 'cancelled' WHERE order_id = $1 AND status != 'served'`,
+      [order.id]
+    );
+    await client.query(
+      `UPDATE bar_order_items SET status = 'cancelled' 
+       WHERE bar_order_id IN (SELECT id FROM bar_orders WHERE order_id = $1)`,
+      [order.id]
+    );
+
+    // 6. Free table if no other active orders occupy it
+    if (order.table_id) {
+      const otherOrders = await client.query(
+        `SELECT id FROM orders 
+         WHERE table_id = $1 AND id != $2 AND status NOT IN ('completed', 'cancelled')
+         LIMIT 1`,
+        [order.table_id, order.id]
+      );
+      if (otherOrders.rows.length === 0) {
+        await client.query(
+          `UPDATE restaurant_tables 
+           SET status = 'available', current_waiter_id = NULL 
+           WHERE id = $1`,
+          [order.table_id]
+        );
+      }
+    }
+
+    // 7. Update the order record to cancelled with 0 totals
+    const updateRes = await client.query(
+      `UPDATE orders
+       SET status = 'cancelled',
+           subtotal = 0,
+           tax = 0,
+           total = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [order.id]
+    );
+
+    await client.query("COMMIT");
+    return updateRes.rows[0] || null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 
@@ -1542,7 +1686,7 @@ const deleteTable = async (id) => {
 // HELPER: ADJUST DEPARTMENT INVENTORY STOCK (ADD / RESTORE)
 // ============================================================
 
-const adjustDepartmentStock = async (
+async function adjustDepartmentStock(
   client,
   product,
   quantity,
@@ -1553,7 +1697,7 @@ const adjustDepartmentStock = async (
   isRestore = false,
   reason = "",
   shotsDeduction = null
-) => {
+) {
   if (!targetDepartment) return;
 
   let stockProductId = product.id;

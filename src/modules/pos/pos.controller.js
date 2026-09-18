@@ -104,6 +104,7 @@ const updateOrderStatus = async (req, res) => {
 
     const {
       status,
+      reason,
     } = req.body;
 
 
@@ -136,7 +137,9 @@ const updateOrderStatus = async (req, res) => {
 
     const order = await posService.updateOrderStatus(
       req.params.id,
-      status
+      status,
+      req.user?.id,
+      reason
     );
 
 

@@ -389,23 +389,45 @@ const createOrder = async (order) => {
 
     let employeeId = null;
 
-    if (waiterId) {
-      const employeeResult = await client.query(
-        `
-        SELECT
-          id,
-          first_name,
-          last_name,
-          role_id,
-          user_id
-        FROM employees
-        WHERE user_id = $1 OR id = $1
-        LIMIT 1
-        `,
-        [waiterId]
-      );
+    const isUUID = (val) =>
+      typeof val === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
 
-      if (employeeResult.rows.length > 0) {
+    if (waiterId) {
+      let employeeResult = null;
+      if (isUUID(waiterId)) {
+        employeeResult = await client.query(
+          `
+          SELECT
+            id,
+            first_name,
+            last_name,
+            role_id,
+            user_id
+          FROM employees
+          WHERE user_id = $1
+          LIMIT 1
+          `,
+          [waiterId]
+        );
+      } else if (Number.isInteger(Number(waiterId)) && Number(waiterId) > 0) {
+        employeeResult = await client.query(
+          `
+          SELECT
+            id,
+            first_name,
+            last_name,
+            role_id,
+            user_id
+          FROM employees
+          WHERE id = $1
+          LIMIT 1
+          `,
+          [Number(waiterId)]
+        );
+      }
+
+      if (employeeResult && employeeResult.rows.length > 0) {
         employeeId = employeeResult.rows[0].id;
       } else if (Number.isInteger(Number(waiterId)) && Number(waiterId) > 0) {
         employeeId = Number(waiterId);
@@ -416,11 +438,20 @@ const createOrder = async (order) => {
     if (!employeeId && order.user) {
       const fallbackUserId = order.user.employee_id || order.user.employeeId || order.user.id || order.user.user_id;
       if (fallbackUserId) {
-        const empRes = await client.query(
-          `SELECT id FROM employees WHERE user_id = $1 OR id = $1 LIMIT 1`,
-          [fallbackUserId]
-        );
-        if (empRes.rows.length > 0) {
+        let empRes = null;
+        if (isUUID(fallbackUserId)) {
+          empRes = await client.query(
+            `SELECT id FROM employees WHERE user_id = $1 LIMIT 1`,
+            [fallbackUserId]
+          );
+        } else if (Number.isInteger(Number(fallbackUserId)) && Number(fallbackUserId) > 0) {
+          empRes = await client.query(
+            `SELECT id FROM employees WHERE id = $1 LIMIT 1`,
+            [Number(fallbackUserId)]
+          );
+        }
+
+        if (empRes && empRes.rows.length > 0) {
           employeeId = empRes.rows[0].id;
         } else if (Number.isInteger(Number(fallbackUserId)) && Number(fallbackUserId) > 0) {
           employeeId = Number(fallbackUserId);
@@ -2000,12 +2031,13 @@ const createStaffOrder = async (orderData = {}, user = null) => {
     let resolvedEmployeeName = employeeName || "Staff Member";
 
     if (employeeId) {
+      const isUUIDStr = typeof employeeId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeId.trim());
       const empRes = await client.query(
         `SELECT e.id, e.first_name, e.last_name, d.name AS department 
          FROM employees e 
          LEFT JOIN departments d ON e.department_id = d.id 
-         WHERE e.id = $1`,
-        [employeeId]
+         WHERE ${isUUIDStr ? "e.user_id" : "e.id"} = $1`,
+        [isUUIDStr ? employeeId : Number(employeeId)]
       );
       if (empRes.rows.length > 0) {
         resolvedEmployeeId = empRes.rows[0].id;

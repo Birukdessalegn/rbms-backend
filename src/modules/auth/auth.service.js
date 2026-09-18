@@ -127,6 +127,8 @@ const loginUser = async (username, password) => {
       username: user.username,
       roleId: user.role_id,
       role: user.role,
+      employee_id: user.employee_id || null,
+      employeeId: user.employee_id || null,
     },
     process.env.JWT_SECRET,
     {
@@ -148,6 +150,10 @@ const loginUser = async (username, password) => {
       email: user.email,
       roleId: user.role_id,
       role: user.role,
+      employee_id: user.employee_id || null,
+      employeeId: user.employee_id || null,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
     },
   };
 };

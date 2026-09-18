@@ -1466,6 +1466,26 @@ const updateTable = async (id, data) => {
 // ============================================================
 
 const updateTableStatus = async (id, status, waiterId = null) => {
+  let resolvedWaiterId = null;
+
+  if (waiterId !== null && waiterId !== undefined) {
+    const isUUID =
+      typeof waiterId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(waiterId.trim());
+
+    if (isUUID) {
+      const empRes = await pool.query(
+        "SELECT id FROM employees WHERE user_id = $1 LIMIT 1",
+        [waiterId]
+      );
+      if (empRes.rows.length > 0) {
+        resolvedWaiterId = empRes.rows[0].id;
+      }
+    } else if (Number.isInteger(Number(waiterId)) && Number(waiterId) > 0) {
+      resolvedWaiterId = Number(waiterId);
+    }
+  }
+
   const result = await pool.query(
     `
     UPDATE restaurant_tables
@@ -1479,7 +1499,7 @@ const updateTableStatus = async (id, status, waiterId = null) => {
     WHERE id = $3
     RETURNING *
     `,
-    [status, waiterId || null, id]
+    [status, resolvedWaiterId, id]
   );
 
   return result.rows[0] || null;

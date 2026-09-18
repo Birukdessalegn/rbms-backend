@@ -82,6 +82,10 @@ const getAllOrders = async (waiterUserId = null) => {
       o.id,
       o.order_number,
       o.customer_id,
+      o.vip_customer_id,
+      vc.name AS vip_customer_name,
+      vc.tier AS vip_customer_tier,
+      vc.phone AS vip_customer_phone,
       o.table_id,
       o.waiter_id,
       o.bartender_id,
@@ -120,6 +124,9 @@ const getAllOrders = async (waiterUserId = null) => {
 
     FROM orders o
 
+    LEFT JOIN vip_customers vc
+      ON o.vip_customer_id = vc.id
+
     LEFT JOIN restaurant_tables rt
       ON o.table_id = rt.id
 
@@ -147,21 +154,27 @@ const getAllOrders = async (waiterUserId = null) => {
     const paymentsResult = await pool.query(
       `
       SELECT
-        id,
-        order_id,
-        amount,
-        payment_method,
-        reference,
-        status,
-        paid_at,
-        split_items,
-        COALESCE(receipt_image, image_url) AS image_url,
-        COALESCE(receipt_image, image_url) AS receipt_image,
-        COALESCE(receipt_image, image_url) AS receipt_url,
-        (COALESCE(receipt_image, image_url) IS NOT NULL) AS has_receipt
-      FROM payments
-      WHERE order_id = ANY($1::int[])
-      ORDER BY paid_at DESC
+        p.id,
+        p.order_id,
+        p.amount,
+        p.payment_method,
+        p.reference,
+        p.status,
+        p.paid_at,
+        p.split_items,
+        p.vip_customer_id,
+        vcp.name AS vip_customer_name,
+        vcp.tier AS vip_customer_tier,
+        vcp.phone AS vip_customer_phone,
+        COALESCE(p.receipt_image, p.image_url) AS image_url,
+        COALESCE(p.receipt_image, p.image_url) AS receipt_image,
+        COALESCE(p.receipt_image, p.image_url) AS receipt_url,
+        (COALESCE(p.receipt_image, p.image_url) IS NOT NULL) AS has_receipt
+      FROM payments p
+      LEFT JOIN vip_customers vcp
+        ON p.vip_customer_id = vcp.id
+      WHERE p.order_id = ANY($1::int[])
+      ORDER BY p.paid_at DESC
       `,
       [orderIds]
     );
@@ -223,6 +236,16 @@ const getAllOrders = async (waiterUserId = null) => {
     for (const order of orders) {
       order.payments = paymentsByOrderId[order.id] || [];
       order.items = itemsByOrderId[order.id] || [];
+
+      if (!order.vip_customer_name) {
+        const vipPayment = order.payments.find((p) => p.vip_customer_name);
+        if (vipPayment) {
+          order.vip_customer_name = vipPayment.vip_customer_name;
+          order.vip_customer_tier = vipPayment.vip_customer_tier;
+          order.vip_customer_phone = vipPayment.vip_customer_phone;
+          order.vip_customer_id = vipPayment.vip_customer_id;
+        }
+      }
     }
   }
 
@@ -241,6 +264,10 @@ const getOrderById = async (id) => {
       o.id,
       o.order_number,
       o.customer_id,
+      o.vip_customer_id,
+      vc.name AS vip_customer_name,
+      vc.tier AS vip_customer_tier,
+      vc.phone AS vip_customer_phone,
       o.table_id,
       o.waiter_id,
       o.bartender_id,
@@ -273,6 +300,9 @@ const getOrderById = async (id) => {
       COALESCE(eb.first_name || ' ' || eb.last_name, ub.username) AS bartender_name
 
     FROM orders o
+
+    LEFT JOIN vip_customers vc
+      ON o.vip_customer_id = vc.id
 
     LEFT JOIN restaurant_tables rt
       ON o.table_id = rt.id
@@ -343,25 +373,41 @@ const getOrderById = async (id) => {
   const paymentsResult = await pool.query(
     `
     SELECT
-      id,
-      amount,
-      payment_method,
-      reference,
-      status,
-      paid_at,
-      split_items,
-      COALESCE(receipt_image, image_url) AS image_url,
-      COALESCE(receipt_image, image_url) AS receipt_image,
-      COALESCE(receipt_image, image_url) AS receipt_url,
-      (COALESCE(receipt_image, image_url) IS NOT NULL) AS has_receipt
-    FROM payments
-    WHERE order_id = $1
-    ORDER BY paid_at DESC
+      p.id,
+      p.amount,
+      p.payment_method,
+      p.reference,
+      p.status,
+      p.paid_at,
+      p.split_items,
+      p.vip_customer_id,
+      vcp.name AS vip_customer_name,
+      vcp.tier AS vip_customer_tier,
+      vcp.phone AS vip_customer_phone,
+      COALESCE(p.receipt_image, p.image_url) AS image_url,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_image,
+      COALESCE(p.receipt_image, p.image_url) AS receipt_url,
+      (COALESCE(p.receipt_image, p.image_url) IS NOT NULL) AS has_receipt
+    FROM payments p
+    LEFT JOIN vip_customers vcp
+      ON p.vip_customer_id = vcp.id
+    WHERE p.order_id = $1
+    ORDER BY p.paid_at DESC
     `,
     [order.id]
   );
 
   order.payments = paymentsResult.rows;
+
+  if (!order.vip_customer_name) {
+    const vipPayment = order.payments.find((p) => p.vip_customer_name);
+    if (vipPayment) {
+      order.vip_customer_name = vipPayment.vip_customer_name;
+      order.vip_customer_tier = vipPayment.vip_customer_tier;
+      order.vip_customer_phone = vipPayment.vip_customer_phone;
+      order.vip_customer_id = vipPayment.vip_customer_id;
+    }
+  }
 
   return order;
 };
@@ -1261,8 +1307,35 @@ const createPayment = async (orderId, data) => {
   try {
     await client.query("BEGIN");
 
-    const { amount, paymentMethod, reference, receivedBy, status, vipCustomerId, vip_customer_id, customerId } = data;
-    const targetVipId = vipCustomerId || vip_customer_id || customerId || null;
+    const { amount, paymentMethod, reference, receivedBy, status, vipCustomerId, vip_customer_id, customerId, customerName, customer_name } = data;
+    let targetVipId = vipCustomerId || vip_customer_id || customerId || null;
+
+    if (!targetVipId && (customerName || customer_name)) {
+      const cName = String(customerName || customer_name).trim();
+      if (cName) {
+        const foundVip = await client.query(
+          `SELECT id FROM vip_customers WHERE LOWER(TRIM(name)) = LOWER($1) AND is_active = TRUE LIMIT 1`,
+          [cName]
+        );
+        if (foundVip.rows.length > 0) {
+          targetVipId = foundVip.rows[0].id;
+        }
+      }
+    }
+
+    if (!targetVipId && reference && String(reference).startsWith("VIP_CREDIT:")) {
+      const parsedName = String(reference).replace("VIP_CREDIT:", "").trim();
+      if (parsedName) {
+        const foundVip = await client.query(
+          `SELECT id FROM vip_customers WHERE LOWER(TRIM(name)) = LOWER($1) AND is_active = TRUE LIMIT 1`,
+          [parsedName]
+        );
+        if (foundVip.rows.length > 0) {
+          targetVipId = foundVip.rows[0].id;
+        }
+      }
+    }
+
     const finalImageUrl =
       data.receiptImage ||
       data.imageUrl ||
@@ -1401,7 +1474,7 @@ const createPayment = async (orderId, data) => {
 
     if (targetVipId) {
       await client.query(
-        `UPDATE orders SET vip_customer_id = $1 WHERE id = $2 AND vip_customer_id IS NULL`,
+        `UPDATE orders SET vip_customer_id = $1 WHERE id = $2`,
         [targetVipId, realNumericDbId]
       );
     }

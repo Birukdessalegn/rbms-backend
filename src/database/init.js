@@ -308,7 +308,20 @@ const initializeDatabase = async () => {
 
       CREATE INDEX IF NOT EXISTS idx_shortage_status ON stock_shortage_requests(status);
       CREATE INDEX IF NOT EXISTS idx_shortage_dept ON stock_shortage_requests(department);
-      CREATE INDEX IF NOT EXISTS idx_shortage_created ON stock_shortage_requests(created_at DESC);
+      -- Club Receiving Accounts for Card & Mobile Transfers
+      CREATE TABLE IF NOT EXISTS payment_accounts (
+        id SERIAL PRIMARY KEY,
+        account_type VARCHAR(50) NOT NULL,
+        provider VARCHAR(100) NOT NULL,
+        account_number VARCHAR(100) NOT NULL,
+        account_holder VARCHAR(150),
+        notes VARCHAR(255),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payment_accounts_active ON payment_accounts(is_active);
 
       -- Ensure cPanel user ambbatxv has full rights if role exists
       DO $$

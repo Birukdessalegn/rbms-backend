@@ -679,7 +679,24 @@ const createShortageRequest = async ({
     ]
   );
 
-  return insertRes.rows[0];
+  const createdShortage = insertRes.rows[0];
+
+  // Send real-time notification to Admins and Managers
+  try {
+    const notificationsService = require("../notifications/notifications.service");
+    await notificationsService.createNotification({
+      targetRoles: ["admin", "manager"],
+      title: `Stock Shortage Alert: ${product.name}`,
+      message: `${finalRequester || "F&B Controller"} reported a shortage of ${shortageQty} ${product.unit || "units"} in ${department.toUpperCase()} (${totalLoss.toFixed(2)} ETB loss). Requires Manager approval.`,
+      type: "warning",
+      referenceType: "stock_shortage",
+      referenceId: createdShortage.id,
+    });
+  } catch (notifErr) {
+    console.error("Failed to dispatch shortage notification:", notifErr.message);
+  }
+
+  return createdShortage;
 };
 
 const getShortageRequests = async ({ status, department, limit = 100 } = {}) => {
@@ -834,7 +851,28 @@ const reviewShortageRequest = async ({
     );
 
     await client.query("COMMIT");
-    return updateRes.rows[0];
+    const reviewedRecord = updateRes.rows[0];
+
+    // Notify requester about decision
+    if (shortage.requested_by) {
+      try {
+        const notificationsService = require("../notifications/notifications.service");
+        await notificationsService.createNotification({
+          userId: shortage.requested_by,
+          title: action === "approve" ? `Shortage Approved: ${shortage.product_name}` : `Shortage Rejected: ${shortage.product_name}`,
+          message: action === "approve"
+            ? `Your shortage report for "${shortage.product_name}" in ${shortage.department.toUpperCase()} was approved by ${finalReviewer}. Stock numbers have been updated.`
+            : `Your shortage report for "${shortage.product_name}" in ${shortage.department.toUpperCase()} was rejected by ${finalReviewer}. Note: ${reviewNotes || "No explanation provided."}`,
+          type: action === "approve" ? "success" : "warning",
+          referenceType: "stock_shortage",
+          referenceId: requestId,
+        });
+      } catch (notifErr) {
+        console.error("Failed to notify requester about review:", notifErr.message);
+      }
+    }
+
+    return reviewedRecord;
 
   } catch (error) {
     await client.query("ROLLBACK");

@@ -57,6 +57,25 @@ const createAccount = async (data) => {
     throw new Error("Provider name and account number are required.");
   }
 
+  const cleanProvider = String(provider).trim();
+  const cleanAccountNumber = String(account_number).trim();
+  const cleanAccountHolder = account_holder ? String(account_holder).trim() : "The Oak Club";
+  const cleanNotes = notes ? String(notes).trim() : null;
+  const cleanType = String(account_type || "bank").trim().toLowerCase();
+
+  if (cleanProvider.length > 100) {
+    throw new Error("Provider name cannot exceed 100 characters.");
+  }
+  if (cleanAccountNumber.length > 100) {
+    throw new Error("Account number cannot exceed 100 characters.");
+  }
+  if (cleanAccountHolder && cleanAccountHolder.length > 150) {
+    throw new Error("Account holder name cannot exceed 150 characters.");
+  }
+  if (cleanNotes && cleanNotes.length > 255) {
+    throw new Error("Notes cannot exceed 255 characters.");
+  }
+
   const result = await pool.query(
     `
     INSERT INTO payment_accounts (
@@ -71,11 +90,11 @@ const createAccount = async (data) => {
     RETURNING *
     `,
     [
-      String(account_type).trim().toLowerCase(),
-      String(provider).trim(),
-      String(account_number).trim(),
-      account_holder ? String(account_holder).trim() : null,
-      notes ? String(notes).trim() : null,
+      cleanType,
+      cleanProvider,
+      cleanAccountNumber,
+      cleanAccountHolder,
+      cleanNotes,
       Boolean(is_active),
     ]
   );
@@ -101,6 +120,25 @@ const updateAccount = async (id, data) => {
     is_active = existing.is_active,
   } = data;
 
+  const cleanProvider = String(provider).trim();
+  const cleanAccountNumber = String(account_number).trim();
+  const cleanAccountHolder = account_holder ? String(account_holder).trim() : null;
+  const cleanNotes = notes ? String(notes).trim() : null;
+  const cleanType = String(account_type || existing.account_type).trim().toLowerCase();
+
+  if (cleanProvider.length > 100) {
+    throw new Error("Provider name cannot exceed 100 characters.");
+  }
+  if (cleanAccountNumber.length > 100) {
+    throw new Error("Account number cannot exceed 100 characters.");
+  }
+  if (cleanAccountHolder && cleanAccountHolder.length > 150) {
+    throw new Error("Account holder name cannot exceed 150 characters.");
+  }
+  if (cleanNotes && cleanNotes.length > 255) {
+    throw new Error("Notes cannot exceed 255 characters.");
+  }
+
   const result = await pool.query(
     `
     UPDATE payment_accounts
@@ -116,11 +154,11 @@ const updateAccount = async (id, data) => {
     RETURNING *
     `,
     [
-      String(account_type).trim().toLowerCase(),
-      String(provider).trim(),
-      String(account_number).trim(),
-      account_holder ? String(account_holder).trim() : null,
-      notes ? String(notes).trim() : null,
+      cleanType,
+      cleanProvider,
+      cleanAccountNumber,
+      cleanAccountHolder,
+      cleanNotes,
       Boolean(is_active),
       Number(id),
     ]

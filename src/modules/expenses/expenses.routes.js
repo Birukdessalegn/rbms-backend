@@ -3,6 +3,12 @@ const express = require("express");
 const router = express.Router();
 
 const expensesController = require("./expenses.controller");
+const authenticate = require("../../middleware/auth.middleware");
+const authorize = require("../../middleware/role.middleware");
+
+// Require authentication and management/finance role for all expense operations
+router.use(authenticate);
+router.use(authorize("admin", "manager", "finance"));
 
 
 // Categories

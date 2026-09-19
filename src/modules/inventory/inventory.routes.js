@@ -4,15 +4,10 @@ const router = express.Router();
 const inventoryController = require("./inventory.controller");
 const transfersController = require("./transfers.controller");
 const authenticate = require("../../middleware/auth.middleware");
+const authorize = require("../../middleware/role.middleware");
 
-// Optional auth helper so unauthenticated calls work if needed, but attached req.user if token is present
-const optionalAuth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    return authenticate(req, res, next);
-  }
-  next();
-};
+// Require authentication for all inventory endpoints
+router.use(authenticate);
 
 // ============================================================
 // MULTI-LOCATION MATRIX & LOW STOCK
@@ -26,19 +21,31 @@ router.get("/low-stock", inventoryController.getLowStock);
 
 // Department inventory (/departments/bar or /departments/kitchen)
 router.get("/departments/:department", inventoryController.getDepartmentInventory);
-router.put("/departments/:department/product/:productId", inventoryController.updateDepartmentStockSettings);
+router.put(
+  "/departments/:department/product/:productId",
+  authorize("admin", "manager", "fb_controller"),
+  inventoryController.updateDepartmentStockSettings
+);
 
 // ============================================================
 // STOCK TRANSFERS & REQUISITIONS
 // ============================================================
 
-router.post("/transfers", optionalAuth, transfersController.createTransfer);
-router.post("/transfers/request", optionalAuth, transfersController.requestTransfer);
+router.post("/transfers", transfersController.createTransfer);
+router.post("/transfers/request", transfersController.requestTransfer);
 router.get("/transfers", transfersController.getTransfers);
 router.get("/transfers/:id", transfersController.getTransferById);
-router.put("/transfers/:id/approve", optionalAuth, transfersController.approveTransfer);
-router.put("/transfers/:id/reject", optionalAuth, transfersController.rejectTransfer);
-router.put("/transfers/:id/receive", optionalAuth, transfersController.receiveTransfer);
+router.put(
+  "/transfers/:id/approve",
+  authorize("admin", "manager", "fb_controller", "finance"),
+  transfersController.approveTransfer
+);
+router.put(
+  "/transfers/:id/reject",
+  authorize("admin", "manager", "fb_controller", "finance"),
+  transfersController.rejectTransfer
+);
+router.put("/transfers/:id/receive", transfersController.receiveTransfer);
 
 // ============================================================
 // CENTRAL / MAIN INVENTORY
@@ -48,19 +55,35 @@ router.put("/transfers/:id/receive", optionalAuth, transfersController.receiveTr
 router.get("/", inventoryController.getInventory);
 
 // Create inventory
-router.post("/", inventoryController.createInventory);
+router.post(
+  "/",
+  authorize("admin", "manager", "fb_controller", "finance"),
+  inventoryController.createInventory
+);
 
 // Stock in
-router.post("/stock-in", optionalAuth, inventoryController.stockIn);
+router.post(
+  "/stock-in",
+  authorize("admin", "manager", "fb_controller", "finance"),
+  inventoryController.stockIn
+);
 
 // Stock out
-router.post("/stock-out", optionalAuth, inventoryController.stockOut);
+router.post(
+  "/stock-out",
+  authorize("admin", "manager", "fb_controller", "finance"),
+  inventoryController.stockOut
+);
 
 // Product inventory
 router.get("/product/:productId", inventoryController.getInventoryByProduct);
 
 // Update inventory settings
-router.put("/product/:productId", inventoryController.updateInventory);
+router.put(
+  "/product/:productId",
+  authorize("admin", "manager", "fb_controller"),
+  inventoryController.updateInventory
+);
 
 // Inventory transactions
 router.get("/product/:productId/transactions", inventoryController.getTransactions);

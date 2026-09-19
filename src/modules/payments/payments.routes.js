@@ -5,6 +5,7 @@ const router = express.Router();
 const paymentsController =
   require("./payments.controller");
 const authenticate = require("../../middleware/auth.middleware");
+const authorize = require("../../middleware/role.middleware");
 
 // Protect payment routes with authentication
 router.use(authenticate);
@@ -46,9 +47,10 @@ router.post(
 );
 
 
-// Refund payment
+// Refund payment (Strictly restricted to Admin and Manager)
 router.put(
   "/:id/refund",
+  authorize("admin", "manager"),
   paymentsController.refundPayment
 );
 

@@ -4,7 +4,11 @@ const router = express.Router();
 
 const productsController = require("./products.controller");
 const { uploadProductImage } = require("../../middleware/upload.middleware");
+const authenticate = require("../../middleware/auth.middleware");
+const authorize = require("../../middleware/role.middleware");
 
+// Require authentication for all product endpoints
+router.use(authenticate);
 
 // Categories
 router.get(
@@ -14,6 +18,7 @@ router.get(
 
 router.post(
   "/categories",
+  authorize("admin", "manager"),
   productsController.createCategory
 );
 
@@ -26,6 +31,7 @@ router.get(
 
 router.put(
   "/:id/menu",
+  authorize("admin", "manager"),
   productsController.updateProductMenu
 );
 
@@ -33,6 +39,7 @@ router.put(
 // Image Upload
 router.post(
   "/upload",
+  authorize("admin", "manager"),
   uploadProductImage.single("image"),
   productsController.uploadImage
 );
@@ -51,18 +58,21 @@ router.get(
 
 router.post(
   "/",
+  authorize("admin", "manager"),
   uploadProductImage.single("image"),
   productsController.createProduct
 );
 
 router.put(
   "/:id",
+  authorize("admin", "manager"),
   uploadProductImage.single("image"),
   productsController.updateProduct
 );
 
 router.delete(
   "/:id",
+  authorize("admin", "manager"),
   productsController.deleteProduct
 );
 

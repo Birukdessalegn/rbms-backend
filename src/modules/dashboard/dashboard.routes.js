@@ -3,6 +3,10 @@ const express = require("express");
 const router = express.Router();
 
 const dashboardController = require("./dashboard.controller");
+const authenticate = require("../../middleware/auth.middleware");
+
+// Require authentication for all dashboard routes
+router.use(authenticate);
 
 
 // Main dashboard

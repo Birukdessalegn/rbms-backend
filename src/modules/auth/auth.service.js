@@ -158,7 +158,42 @@ const loginUser = async (username, password) => {
   };
 };
 
+const changePassword = async (userId, currentPassword, newPassword) => {
+  if (!currentPassword || !newPassword) {
+    throw new Error("Current password and new password are required");
+  }
+
+  if (typeof newPassword !== "string" || newPassword.trim().length < 6) {
+    throw new Error("New password must be at least 6 characters long");
+  }
+
+  const result = await pool.query(
+    "SELECT id, password_hash FROM users WHERE id = $1",
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  const user = result.rows[0];
+
+  const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!isMatch) {
+    throw new Error("Incorrect current password");
+  }
+
+  const hashedNewPassword = await bcrypt.hash(newPassword.trim(), 10);
+  await pool.query(
+    "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+    [hashedNewPassword, userId]
+  );
+
+  return { success: true };
+};
+
 module.exports = {
   registerUser,
   loginUser,
+  changePassword,
 };

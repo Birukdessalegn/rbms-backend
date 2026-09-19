@@ -3,6 +3,10 @@ const express = require("express");
 const router = express.Router();
 
 const barController = require("./bar.controller");
+const authenticate = require("../../middleware/auth.middleware");
+
+// Require authentication for all bar endpoints
+router.use(authenticate);
 
 
 // Get all bar orders

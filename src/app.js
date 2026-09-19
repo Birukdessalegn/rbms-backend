@@ -25,13 +25,18 @@ const paymentAccountsRoutes = require("./modules/payment_accounts/payment_accoun
 
 const app = express();
 
-// CORS configuration
-const allowedOrigins = [
-  "https://theoak.ambbatech.com",
-  "http://theoak.ambbatech.com",
-  "http://localhost:5173",
-  "http://localhost:3000"
-];
+// CORS configuration - strictly HTTPS in production
+const defaultOrigins = ["https://theoak.ambbatech.com"];
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : defaultOrigins;
+
+// Only permit localhost ports during local development
+if (process.env.NODE_ENV !== "production") {
+  if (!allowedOrigins.includes("http://localhost:5173")) allowedOrigins.push("http://localhost:5173");
+  if (!allowedOrigins.includes("http://localhost:3000")) allowedOrigins.push("http://localhost:3000");
+}
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -49,6 +54,17 @@ const corsOptions = {
 
 // Apply CORS middleware (handles regular & preflight requests)
 app.use(cors(corsOptions));
+
+// Security Headers Middleware (OWASP recommended, native Express)
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.removeHeader("X-Powered-By");
+  next();
+});
 
 // Body Parsers & Static Files
 app.use(express.json({ limit: "10mb" }));

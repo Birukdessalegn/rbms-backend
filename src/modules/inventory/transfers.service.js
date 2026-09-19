@@ -20,8 +20,8 @@ const createTransfer = async ({
   userId,
   autoReceive = false,
 }) => {
-  if (!toLocation || !["bar", "kitchen"].includes(toLocation.toLowerCase())) {
-    throw new Error("Invalid destination location. Must be 'bar' or 'kitchen'.");
+  if (!toLocation || !["bar", "kitchen", "fruit"].includes(toLocation.toLowerCase())) {
+    throw new Error("Invalid destination location. Must be 'bar', 'kitchen', or 'fruit'.");
   }
 
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -269,8 +269,8 @@ const requestTransfer = async ({
   notes,
   userId,
 }) => {
-  if (!toLocation || !["bar", "kitchen"].includes(toLocation.toLowerCase())) {
-    throw new Error("Invalid department requesting stock. Must be 'bar' or 'kitchen'.");
+  if (!toLocation || !["bar", "kitchen", "fruit"].includes(toLocation.toLowerCase())) {
+    throw new Error("Invalid department requesting stock. Must be 'bar', 'kitchen', or 'fruit'.");
   }
 
   if (!items || !Array.isArray(items) || items.length === 0) {

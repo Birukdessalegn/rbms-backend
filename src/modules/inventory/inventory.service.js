@@ -577,12 +577,22 @@ const getMultiLocationInventory = async () => {
         ELSE 'in_stock'
       END AS kitchen_status,
 
+      -- Fruit Stock
+      COALESCE(f.quantity, 0)::NUMERIC(12,2) AS fruit_quantity,
+      COALESCE(f.minimum_stock, p.low_stock_threshold, 5)::NUMERIC(12,2) AS fruit_minimum_stock,
+      COALESCE(f.out_of_stock_threshold, p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS fruit_out_of_stock_threshold,
+      CASE
+        WHEN COALESCE(f.quantity, 0) <= COALESCE(f.out_of_stock_threshold, p.out_of_stock_threshold, 0) THEN 'out_of_stock'
+        WHEN COALESCE(f.quantity, 0) <= COALESCE(f.minimum_stock, p.low_stock_threshold, 5) THEN 'low_stock'
+        ELSE 'in_stock'
+      END AS fruit_status,
+
       -- Product Default Thresholds
       COALESCE(p.low_stock_threshold, 5)::NUMERIC(12,2) AS low_stock_threshold,
       COALESCE(p.out_of_stock_threshold, 0)::NUMERIC(12,2) AS out_of_stock_threshold,
 
       -- Total on-hand across all stores
-      (COALESCE(i.quantity, 0) + COALESCE(b.quantity, 0) + COALESCE(k.quantity, 0))::NUMERIC(12,2) AS total_quantity,
+      (COALESCE(i.quantity, 0) + COALESCE(b.quantity, 0) + COALESCE(k.quantity, 0) + COALESCE(f.quantity, 0))::NUMERIC(12,2) AS total_quantity,
 
       -- Sold Today
       COALESCE(today_sold.sold_qty, 0)::NUMERIC(12,2) AS sold_today
@@ -594,6 +604,8 @@ const getMultiLocationInventory = async () => {
     LEFT JOIN department_inventory b ON p.id = b.product_id AND b.department = 'bar'
 
     LEFT JOIN department_inventory k ON p.id = k.product_id AND k.department = 'kitchen'
+
+    LEFT JOIN department_inventory f ON p.id = f.product_id AND f.department = 'fruit'
 
     LEFT JOIN product_categories pc ON p.category_id = pc.id
 
@@ -656,8 +668,8 @@ const updateDepartmentStockSettings = async (department, productId, data) => {
       [productId, minVal, maxVal]
     );
 
-    // Update both Bar & Kitchen
-    for (const d of ["bar", "kitchen"]) {
+    // Update Bar, Kitchen & Fruit
+    for (const d of ["bar", "kitchen", "fruit"]) {
       await pool.query(
         `
         INSERT INTO department_inventory (

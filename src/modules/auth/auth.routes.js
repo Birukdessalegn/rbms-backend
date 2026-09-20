@@ -4,6 +4,7 @@ const {
   register,
   login,
   changePassword,
+  getProfile,
 } = require("./auth.controller");
 
 const authenticate = require("../../middleware/auth.middleware");
@@ -23,14 +24,9 @@ router.post("/register", authenticate, authorize("admin"), register);
 router.post("/login", loginLimiter, login);
 router.put("/change-password", authenticate, changePassword);
 
-// Protected test route
-router.get("/me", authenticate, (req, res) => {
-  res.json({
-    success: true,
-    message: "Authenticated successfully",
-    user: req.user,
-  });
-});
+// Get currently logged-in user profile (including employee name)
+router.get("/me", authenticate, getProfile);
+router.get("/profile", authenticate, getProfile);
 
 // Admin + Manager only
 router.get(

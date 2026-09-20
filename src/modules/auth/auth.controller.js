@@ -94,8 +94,32 @@ const changePassword = async (req, res) => {
   }
 };
 
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    const user = await authService.getProfile(userId);
+    res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   changePassword,
+  getProfile,
 };

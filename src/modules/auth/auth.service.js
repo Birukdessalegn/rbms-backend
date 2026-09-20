@@ -44,10 +44,27 @@ const loginUser = async (username, password) => {
       u.status,
       r.name AS role,
       e.id AS employee_id,
+      e.employee_code,
+      e.first_name,
+      e.last_name,
+      TRIM(CONCAT(e.first_name, ' ', e.last_name)) AS employee_name,
       e.status AS employee_status
      FROM users u
      LEFT JOIN roles r ON u.role_id = r.id
-     LEFT JOIN employees e ON e.user_id = u.id
+     LEFT JOIN LATERAL (
+       SELECT id, employee_code, first_name, last_name, phone, status
+       FROM employees
+       WHERE user_id = u.id
+          OR (u.email IS NOT NULL AND email IS NOT NULL AND LOWER(email) = LOWER(u.email))
+          OR (LOWER(first_name) = LOWER(u.username))
+       ORDER BY
+         CASE
+           WHEN user_id = u.id THEN 1
+           WHEN u.email IS NOT NULL AND email IS NOT NULL AND LOWER(email) = LOWER(u.email) THEN 2
+           ELSE 3
+         END ASC
+       LIMIT 1
+     ) e ON true
      WHERE LOWER(TRIM(u.username)) = LOWER(TRIM($1))`,
     [username]
   );
@@ -142,6 +159,8 @@ const loginUser = async (username, password) => {
     [user.id]
   );
 
+  const empName = user.employee_name && user.employee_name.trim() !== "" ? user.employee_name.trim() : null;
+
   return {
     token,
     user: {
@@ -152,9 +171,71 @@ const loginUser = async (username, password) => {
       role: user.role,
       employee_id: user.employee_id || null,
       employeeId: user.employee_id || null,
+      employee_code: user.employee_code || null,
       first_name: user.first_name || null,
       last_name: user.last_name || null,
+      employee_name: empName,
+      name: empName || user.username,
     },
+  };
+};
+
+const getProfile = async (userId) => {
+  const result = await pool.query(
+    `SELECT
+      u.id,
+      u.username,
+      u.email,
+      u.role_id,
+      u.status,
+      r.name AS role,
+      e.id AS employee_id,
+      e.employee_code,
+      e.first_name,
+      e.last_name,
+      TRIM(CONCAT(e.first_name, ' ', e.last_name)) AS employee_name,
+      e.phone
+     FROM users u
+     LEFT JOIN roles r ON u.role_id = r.id
+     LEFT JOIN LATERAL (
+       SELECT id, employee_code, first_name, last_name, phone, status
+       FROM employees
+       WHERE user_id = u.id
+          OR (u.email IS NOT NULL AND email IS NOT NULL AND LOWER(email) = LOWER(u.email))
+          OR (LOWER(first_name) = LOWER(u.username))
+       ORDER BY
+         CASE
+           WHEN user_id = u.id THEN 1
+           WHEN u.email IS NOT NULL AND email IS NOT NULL AND LOWER(email) = LOWER(u.email) THEN 2
+           ELSE 3
+         END ASC
+       LIMIT 1
+     ) e ON true
+     WHERE u.id = $1`,
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  const user = result.rows[0];
+  const empName = user.employee_name && user.employee_name.trim() !== "" ? user.employee_name.trim() : null;
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    roleId: user.role_id,
+    role: user.role,
+    employee_id: user.employee_id || null,
+    employeeId: user.employee_id || null,
+    employee_code: user.employee_code || null,
+    first_name: user.first_name || null,
+    last_name: user.last_name || null,
+    employee_name: empName,
+    name: empName || user.username,
+    phone: user.phone || null,
   };
 };
 
@@ -195,5 +276,6 @@ const changePassword = async (userId, currentPassword, newPassword) => {
 module.exports = {
   registerUser,
   loginUser,
+  getProfile,
   changePassword,
 };

@@ -15,9 +15,15 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
       COALESCE(SUM(amount), 0) AS total_sales,
       COUNT(DISTINCT order_id) AS total_orders_count
     FROM payments
-    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
-      AND status = 'paid'
-      AND paid_at >= $2
+    WHERE status = 'paid'
+      AND (
+        ($4::int IS NOT NULL AND cashier_shift_id = $4::int)
+        OR (
+          (cashier_shift_id = $4::int OR cashier_shift_id IS NULL)
+          AND (received_by = $1 OR received_by IS NULL OR $1 IS NULL)
+          AND paid_at >= DATE_TRUNC('day', $2::timestamp)
+        )
+      )
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     `,
     [cashierId, startTime, endTime, shiftId]
@@ -31,9 +37,15 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
       COUNT(*) AS transactions_count, 
       COALESCE(SUM(amount), 0) AS total_amount
     FROM payments
-    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
-      AND status = 'paid'
-      AND paid_at >= $2
+    WHERE status = 'paid'
+      AND (
+        ($4::int IS NOT NULL AND cashier_shift_id = $4::int)
+        OR (
+          (cashier_shift_id = $4::int OR cashier_shift_id IS NULL)
+          AND (received_by = $1 OR received_by IS NULL OR $1 IS NULL)
+          AND paid_at >= DATE_TRUNC('day', $2::timestamp)
+        )
+      )
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     GROUP BY payment_method
     ORDER BY total_amount DESC
@@ -46,10 +58,16 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
     `
     SELECT COALESCE(SUM(amount), 0) AS cash_refunds
     FROM payments
-    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
-      AND status = 'refunded'
+    WHERE status = 'refunded'
       AND LOWER(payment_method) = 'cash'
-      AND paid_at >= $2
+      AND (
+        ($4::int IS NOT NULL AND cashier_shift_id = $4::int)
+        OR (
+          (cashier_shift_id = $4::int OR cashier_shift_id IS NULL)
+          AND (received_by = $1 OR received_by IS NULL OR $1 IS NULL)
+          AND paid_at >= DATE_TRUNC('day', $2::timestamp)
+        )
+      )
       AND ($3::timestamp IS NULL OR paid_at <= $3::timestamp)
     `,
     [cashierId, startTime, endTime, shiftId]
@@ -60,9 +78,15 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
     `
     SELECT COALESCE(SUM(amount), 0) AS repayments_cash
     FROM customer_repayments
-    WHERE (received_by = $1 OR ($4::int IS NOT NULL AND cashier_shift_id = $4::int))
-      AND LOWER(payment_method) = 'cash'
-      AND created_at >= $2
+    WHERE LOWER(payment_method) = 'cash'
+      AND (
+        ($4::int IS NOT NULL AND cashier_shift_id = $4::int)
+        OR (
+          (cashier_shift_id = $4::int OR cashier_shift_id IS NULL)
+          AND (received_by = $1 OR received_by IS NULL OR $1 IS NULL)
+          AND created_at >= DATE_TRUNC('day', $2::timestamp)
+        )
+      )
       AND ($3::timestamp IS NULL OR created_at <= $3::timestamp)
     `,
     [cashierId, startTime, endTime, shiftId]
@@ -73,9 +97,9 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
     `
     SELECT COALESCE(SUM(amount), 0) AS expenses_cash
     FROM expenses
-    WHERE created_by = $1
+    WHERE (created_by = $1 OR $1 IS NULL)
       AND LOWER(payment_method) = 'cash'
-      AND created_at >= $2
+      AND created_at >= DATE_TRUNC('day', $2::timestamp)
       AND ($3::timestamp IS NULL OR created_at <= $3::timestamp)
     `,
     [cashierId, startTime, endTime]
@@ -88,7 +112,7 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
     FROM orders
     WHERE status NOT IN ('completed', 'cancelled')
       AND payment_status != 'paid'
-      AND created_at >= $1
+      AND created_at >= DATE_TRUNC('day', $1::timestamp)
       AND ($2::timestamp IS NULL OR created_at <= $2::timestamp)
     `,
     [startTime, endTime]
@@ -185,6 +209,37 @@ const getCurrentShift = async (cashierId) => {
 
   // 3. Compute stats
   const isLive = shift.status === "open";
+
+  if (isLive && shift.id) {
+    // Automatically associate unassigned payments made today to this active shift
+    try {
+      await pool.query(
+        `
+        UPDATE payments
+        SET cashier_shift_id = $1
+        WHERE cashier_shift_id IS NULL
+          AND status = 'paid'
+          AND paid_at >= DATE_TRUNC('day', $2::timestamp)
+          AND paid_at <= CURRENT_TIMESTAMP
+        `,
+        [shift.id, shift.start_time]
+      );
+
+      await pool.query(
+        `
+        UPDATE customer_repayments
+        SET cashier_shift_id = $1
+        WHERE cashier_shift_id IS NULL
+          AND created_at >= DATE_TRUNC('day', $2::timestamp)
+          AND created_at <= CURRENT_TIMESTAMP
+        `,
+        [shift.id, shift.start_time]
+      );
+    } catch (linkErr) {
+      console.error("[getCurrentShift] Error linking today's payments to shift:", linkErr);
+    }
+  }
+
   const stats = await getPaymentSalesStats(
     shift.cashier_id,
     shift.start_time,
@@ -326,10 +381,44 @@ const closeShift = async (cashierId, closingData = {}) => {
     throw new Error("No active open shift found to close.");
   }
 
-  // 2. Compute final stats
+  // 2. Automatically link any unassigned payments made today to this closing shift
+  try {
+    await pool.query(
+      `
+      UPDATE payments
+      SET cashier_shift_id = $1
+      WHERE cashier_shift_id IS NULL
+        AND status = 'paid'
+        AND paid_at >= DATE_TRUNC('day', $2::timestamp)
+        AND paid_at <= CURRENT_TIMESTAMP
+      `,
+      [shift.id, shift.start_time]
+    );
+
+    await pool.query(
+      `
+      UPDATE customer_repayments
+      SET cashier_shift_id = $1
+      WHERE cashier_shift_id IS NULL
+        AND created_at >= DATE_TRUNC('day', $2::timestamp)
+        AND created_at <= CURRENT_TIMESTAMP
+      `,
+      [shift.id, shift.start_time]
+    );
+  } catch (linkErr) {
+    console.error("[closeShift] Error linking today's payments to shift:", linkErr);
+  }
+
+  // 3. Compute final stats
   const stats = await getPaymentSalesStats(cashierId, shift.start_time, null, shift.id);
   const openingCash = parseFloat(shift.opening_cash || 0);
-  const expectedCash = openingCash + stats.cashSales + stats.repaymentsCash - stats.expensesCash - stats.cashRefunds;
+  let expectedCash = openingCash + stats.cashSales + stats.repaymentsCash - stats.expensesCash - stats.cashRefunds;
+
+  const clientExpected = parseFloat(closingData.expected_cash || closingData.expectedCash || 0);
+  if (expectedCash <= 0 && clientExpected > 0) {
+    expectedCash = clientExpected;
+  }
+
   const shortageOverage = countedCash - expectedCash;
 
   // 3. Update shift to closed_pending_approval

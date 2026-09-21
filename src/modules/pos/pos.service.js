@@ -9,13 +9,22 @@ const resolveTargetDepartment = (product) => {
   const categoryType = (product.category_type || "").toLowerCase().trim();
   const categoryName = (product.category_name || "").toLowerCase().trim();
   const productName = (product.name || "").toLowerCase().trim();
+  const tags = (product.tags || "").toLowerCase().trim();
+
+  // Fruit Items (Deduct Fruit sub-store stock & ticket to Fruit/Kitchen prep queue)
+  if (
+    categoryType === "fruit" ||
+    categoryName.includes("fruit") ||
+    productName.includes("fruit") ||
+    tags.includes("fruit")
+  ) {
+    return "fruit";
+  }
 
   // Kitchen / Food Items (Ticket to Kitchen & deduct Kitchen stock)
   if (
     categoryType === "food" ||
     categoryType === "kitchen" ||
-    categoryType === "fruit" ||
-    categoryName.includes("fruit") ||
     categoryName.includes("food") ||
     categoryName.includes("kitchen") ||
     categoryName.includes("salad") ||
@@ -25,8 +34,7 @@ const resolveTargetDepartment = (product) => {
     categoryName.includes("meal") ||
     productName.includes("salad") ||
     productName.includes("pizza") ||
-    productName.includes("burger") ||
-    productName.includes("fruit")
+    productName.includes("burger")
   ) {
     return "kitchen";
   }
@@ -807,8 +815,8 @@ const createOrder = async (order) => {
 
         const targetDepartment = resolveTargetDepartment(product);
 
-        // Kitchen Products
-        if (targetDepartment === "kitchen") {
+        // Kitchen & Fruit Products (Dispatch prep ticket to kitchen/fruit station)
+        if (targetDepartment === "kitchen" || targetDepartment === "fruit") {
           kitchenItems.push(createdItem);
         }
         // Bar Products
@@ -1107,6 +1115,7 @@ const createOrder = async (order) => {
       const targetRoles = ["admin", "manager", "fb_controller", "storekeeper"];
       if (alert.department === "bar" && !targetRoles.includes("bartender")) targetRoles.push("bartender");
       if (alert.department === "kitchen" && !targetRoles.includes("chef")) targetRoles.push("chef");
+      if (alert.department === "fruit" && !targetRoles.includes("fruit_manager")) targetRoles.push("fruit_manager");
 
       notificationsService.createNotification({
         targetRoles,
@@ -1197,6 +1206,7 @@ const updateOrderStatus = async (id, status, userId = null, reason = "") => {
       `SELECT oi.*, 
               p.id AS p_id, p.name AS p_name, p.unit AS p_unit, 
               p.parent_product_id, p.portion_ratio, p.shots_capacity,
+              COALESCE(p.tags, '') AS tags,
               pc.type AS category_type, pc.name AS category_name
        FROM order_items oi
        JOIN products p ON oi.product_id = p.id
@@ -1216,6 +1226,7 @@ const updateOrderStatus = async (id, status, userId = null, reason = "") => {
         shots_capacity: item.shots_capacity,
         category_type: item.category_type,
         category_name: item.category_name,
+        tags: item.tags,
       };
 
       const targetDept = resolveTargetDepartment(product);
@@ -2004,7 +2015,7 @@ const addOrderItems = async (orderId, newItems = [], user = null) => {
       const createdItem = itemResult.rows[0];
 
       const targetDept = resolveTargetDepartment(product);
-      if (targetDept === "kitchen") {
+      if (targetDept === "kitchen" || targetDept === "fruit") {
         kitchenItems.push(createdItem);
       } else if (targetDept === "bar") {
         barItems.push(createdItem);
@@ -2442,7 +2453,7 @@ const createStaffOrder = async (orderData = {}, user = null) => {
       const createdItem = oiRes.rows[0];
 
       const targetDept = resolveTargetDepartment(ri.product);
-      if (targetDept === "kitchen") {
+      if (targetDept === "kitchen" || targetDept === "fruit") {
         kitchenItems.push(createdItem);
       } else if (targetDept === "bar") {
         barItems.push(createdItem);

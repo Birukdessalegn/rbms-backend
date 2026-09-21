@@ -124,6 +124,7 @@ const updateKitchenOrderStatus = async (req, res) => {
       "served",
       "completed",
       "cancelled",
+      "rejected",
     ];
 
     if (!status) {
@@ -143,7 +144,9 @@ const updateKitchenOrderStatus = async (req, res) => {
     const order = await kitchenService.updateKitchenOrderStatus(
       req.params.id,
       status,
-      chefId
+      chefId,
+      req.user?.id,
+      req.body.reason
     );
 
     if (!order) {

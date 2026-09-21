@@ -260,7 +260,90 @@ const createKitchenOrder = async (data) => {
 // UPDATE KITCHEN ORDER STATUS
 // ============================================================
 
-const updateKitchenOrderStatus = async (id, status, chefId) => {
+const updateKitchenOrderStatus = async (id, status, chefId, userId = null, reason = "") => {
+  // If cancelling / rejecting, perform full cancellation, stock restoration, and table release
+  if (status === "cancelled" || status === "rejected") {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // 1. Fetch kitchen order
+      const koRes = await client.query(
+        `SELECT * FROM kitchen_orders WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+
+      if (koRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      const kitchenOrder = koRes.rows[0];
+      const noteReason = reason ? `[Refused/Rejected: ${reason}]` : "[Refused/Rejected by Customer]";
+
+      // 2. Update kitchen_orders status to 'cancelled' and append rejection note
+      const updatedKoRes = await client.query(
+        `
+        UPDATE kitchen_orders
+        SET
+          status = 'cancelled',
+          notes = CASE 
+            WHEN notes IS NULL OR notes = '' THEN $1 
+            ELSE notes || ' | ' || $1 
+          END
+        WHERE id = $2
+        RETURNING *
+        `,
+        [noteReason, id]
+      );
+
+      // 3. Update kitchen_order_items to 'cancelled'
+      await client.query(
+        `
+        UPDATE kitchen_order_items
+        SET status = 'cancelled'
+        WHERE kitchen_order_id = $1
+        `,
+        [id]
+      );
+
+      await client.query("COMMIT");
+
+      // 4. Trigger POS stock restoration, table freeing, and order cancellation
+      try {
+        const posService = require("../pos/pos.service");
+        await posService.updateOrderStatus(
+          kitchenOrder.order_id,
+          "cancelled",
+          userId,
+          reason || "Customer refused order at Fruit / Kitchen station"
+        );
+      } catch (posErr) {
+        console.warn("Notice: posService.updateOrderStatus during kitchen rejection:", posErr?.message);
+        // Fallback: make sure order and items are marked cancelled in DB
+        await pool.query(
+          `UPDATE orders SET status = 'cancelled', notes = CASE WHEN notes IS NULL OR notes = '' THEN $1 ELSE notes || ' | ' || $1 END, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [noteReason, kitchenOrder.order_id]
+        );
+        await pool.query(
+          `UPDATE order_items SET status = 'cancelled' WHERE order_id = $1`,
+          [kitchenOrder.order_id]
+        );
+      }
+
+      return updatedKoRes.rows[0];
+
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+
+    } finally {
+      client.release();
+    }
+  }
+
+  // Standard non-cancel status update (preparing, ready, served, etc.)
   const client = await pool.connect();
 
   try {

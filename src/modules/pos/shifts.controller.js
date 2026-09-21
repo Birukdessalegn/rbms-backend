@@ -88,8 +88,30 @@ const closeShift = async (req, res) => {
   }
 };
 
+// ============================================================
+// GET SHIFTS / CLOSED AUDITS HISTORY
+// ============================================================
+const getShiftsHistory = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit || 50, 10);
+    const shifts = await shiftsService.getShiftsHistory(limit);
+    return res.json({
+      success: true,
+      data: shifts,
+      shifts,
+    });
+  } catch (error) {
+    console.error("Error getting shifts history:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch shifts history",
+    });
+  }
+};
+
 module.exports = {
   getCurrentShift,
   startShift,
   closeShift,
+  getShiftsHistory,
 };

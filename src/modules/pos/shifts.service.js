@@ -481,9 +481,71 @@ const closeShift = async (cashierId, closingData = {}) => {
   };
 };
 
+// ============================================================
+// GET ALL SHIFTS / CLOSED AUDITS HISTORY
+// ============================================================
+const getShiftsHistory = async (limit = 50) => {
+  const result = await pool.query(
+    `
+    SELECT 
+      cs.id,
+      cs.cashier_id,
+      COALESCE(cs.cashier_name, e.first_name || ' ' || e.last_name, u.username) AS cashier_name,
+      cs.terminal_id,
+      cs.start_time,
+      cs.end_time,
+      cs.opening_cash,
+      cs.expected_cash,
+      cs.actual_cash,
+      cs.shortage_overage,
+      cs.total_card_sales,
+      cs.total_mobile_sales,
+      cs.total_credit_sales,
+      cs.total_repayments_cash,
+      cs.total_expenses_cash,
+      cs.total_refunds_cash,
+      cs.total_sales,
+      cs.total_orders_count,
+      cs.status,
+      cs.cashier_notes,
+      cs.verified_by,
+      COALESCE(cs.verified_by_name, ve.first_name || ' ' || ve.last_name, vu.username) AS verified_by_name,
+      cs.verified_at,
+      cs.verification_notes,
+      cs.created_at,
+      cs.updated_at
+    FROM cashier_shifts cs
+    LEFT JOIN users u ON cs.cashier_id = u.id
+    LEFT JOIN employees e ON e.user_id = u.id
+    LEFT JOIN users vu ON cs.verified_by = vu.id
+    LEFT JOIN employees ve ON ve.user_id = vu.id
+    ORDER BY cs.start_time DESC
+    LIMIT $1
+    `,
+    [limit]
+  );
+
+  return result.rows.map((row) => ({
+    ...row,
+    opening_cash: parseFloat(row.opening_cash || 0),
+    expected_cash: parseFloat(row.expected_cash || 0),
+    actual_cash: parseFloat(row.actual_cash || 0),
+    shortage_overage: parseFloat(row.shortage_overage || 0),
+    total_card_sales: parseFloat(row.total_card_sales || 0),
+    total_mobile_sales: parseFloat(row.total_mobile_sales || 0),
+    total_credit_sales: parseFloat(row.total_credit_sales || 0),
+    total_repayments_cash: parseFloat(row.total_repayments_cash || 0),
+    total_expenses_cash: parseFloat(row.total_expenses_cash || 0),
+    total_refunds_cash: parseFloat(row.total_refunds_cash || 0),
+    total_sales: parseFloat(row.total_sales || 0),
+    total_orders_count: parseInt(row.total_orders_count || 0, 10),
+  }));
+};
+
 module.exports = {
   getCurrentShift,
   startShift,
   closeShift,
   getPaymentSalesStats,
+  getShiftsHistory,
 };

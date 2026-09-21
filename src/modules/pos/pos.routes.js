@@ -31,6 +31,19 @@ router.post(
   shiftsController.closeShift
 );
 
+// Get shift history / closed audits
+router.get(
+  "/shifts/history",
+  authenticate,
+  shiftsController.getShiftsHistory
+);
+
+router.get(
+  "/shifts",
+  authenticate,
+  shiftsController.getShiftsHistory
+);
+
 // ============================================================
 // ORDERS
 // ============================================================

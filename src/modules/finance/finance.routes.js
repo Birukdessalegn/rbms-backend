@@ -29,4 +29,22 @@ router.post(
   financeController.verifyCashierShift
 );
 
+// =========================================================
+// COST ANALYSIS & MENU ENGINEERING ROUTES
+// =========================================================
+
+router.get(
+  "/cost-analysis",
+  authenticate,
+  authorize("admin", "manager", "finance"),
+  financeController.getCostAnalysis
+);
+
+router.patch(
+  "/cost-analysis/product/:id/cost",
+  authenticate,
+  authorize("admin", "manager", "finance"),
+  financeController.updateProductCost
+);
+
 module.exports = router;

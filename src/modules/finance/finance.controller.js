@@ -104,6 +104,65 @@ const verifyCashierShift = async (req, res) => {
 };
 
 
+const costAnalysisService = require("./costAnalysis.service");
+
+// =========================================================
+// GET COST ANALYSIS & COGS
+// =========================================================
+
+const getCostAnalysis = async (req, res) => {
+  try {
+    const { timeframe = "today", department = "all" } = req.query;
+    const analysis = await costAnalysisService.getCostAnalysis({ timeframe, department });
+
+    return res.status(200).json({
+      success: true,
+      data: analysis,
+    });
+  } catch (error) {
+    console.error("Error fetching cost analysis:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error generating cost analysis",
+      error: error.message,
+    });
+  }
+};
+
+// =========================================================
+// UPDATE PRODUCT COST PRICE
+// =========================================================
+
+const updateProductCost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { costPrice } = req.body;
+
+    if (costPrice === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "costPrice is required",
+      });
+    }
+
+    const updated = await costAnalysisService.updateProductCostPrice(id, costPrice);
+
+    return res.status(200).json({
+      success: true,
+      message: `Cost price updated for ${updated.name}`,
+      data: updated,
+    });
+  } catch (error) {
+    console.error("Error updating product cost:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update product cost",
+      error: error.message,
+    });
+  }
+};
+
+
 // =========================================================
 // EXPORT
 // =========================================================
@@ -112,4 +171,6 @@ module.exports = {
   getCashierShifts,
   getCashierShiftById,
   verifyCashierShift,
+  getCostAnalysis,
+  updateProductCost,
 };

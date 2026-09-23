@@ -4,6 +4,7 @@ const router = express.Router();
 
 const attendanceController = require("./attendance.controller");
 const authenticate = require("../../middleware/auth.middleware");
+const authorize = require("../../middleware/role.middleware");
 
 router.use(authenticate);
 
@@ -31,11 +32,13 @@ router.put(
 
 router.post(
   "/",
+  authorize("admin", "hr", "cashier"),
   attendanceController.createAttendance
 );
 
 router.post(
   "/auto-mark",
+  authorize("admin", "hr"),
   attendanceController.triggerAutoMark
 );
 

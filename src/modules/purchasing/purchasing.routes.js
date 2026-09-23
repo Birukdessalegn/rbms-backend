@@ -26,7 +26,7 @@ router.get(
 
 router.post(
   "/suppliers",
-  authorize("admin", "manager", "finance"),
+  authorize("admin", "manager", "finance", "purchasing"),
   purchasingController.createSupplier
 );
 
@@ -47,21 +47,21 @@ router.get(
 
 router.post(
   "/",
-  authorize("admin", "manager", "finance"),
+  authorize("admin", "manager", "finance", "purchasing"),
   purchasingController.createPurchase
 );
 
 router.put(
   "/:id",
-  authorize("admin", "manager", "finance"),
+  authorize("admin", "manager", "finance", "purchasing"),
   purchasingController.updatePurchase
 );
 
 
-// Receive purchase
+// Receive purchase (storekeeper and purchasing can physically receive stock)
 router.post(
   "/:id/receive",
-  authorize("admin", "manager", "finance"),
+  authorize("admin", "manager", "finance", "purchasing", "storekeeper"),
   purchasingController.receivePurchase
 );
 
@@ -69,7 +69,7 @@ router.post(
 // Cancel purchase
 router.post(
   "/:id/cancel",
-  authorize("admin", "manager", "finance"),
+  authorize("admin", "manager", "finance", "purchasing"),
   purchasingController.cancelPurchase
 );
 

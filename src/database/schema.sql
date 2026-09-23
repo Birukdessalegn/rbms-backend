@@ -957,7 +957,8 @@ VALUES
     ('bartender', 'Bar staff'),
     ('fb_controller', 'Food & Beverage Controller / Kitchen Auditor'),
     ('fruit_manager', 'Fruit & Shisha Manager / Supervisor'),
-    ('fruit', 'Fruit Man / Shisha & Fruit Prep Staff')
+    ('fruit', 'Fruit Man / Shisha & Fruit Prep Staff'),
+    ('host', 'Host, hostess, and table reception staff')
 ON CONFLICT (name) DO NOTHING;
 
 

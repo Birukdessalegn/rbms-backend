@@ -555,6 +555,18 @@ const receivePurchase = async (purchaseId, userId) => {
         `,
         [item.id]
       );
+
+      // Update product cost_price to match the received purchase price
+      if (Number(item.unit_price) > 0) {
+        await client.query(
+          `
+          UPDATE products
+          SET cost_price = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+          `,
+          [Number(item.unit_price), item.product_id]
+        );
+      }
     }
 
     // Mark purchase received

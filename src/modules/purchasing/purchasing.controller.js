@@ -168,9 +168,10 @@ const createPurchase = async (req, res) => {
     }
 
     const purchase =
-      await purchasingService.createPurchase(
-        req.body
-      );
+      await purchasingService.createPurchase({
+        ...req.body,
+        createdBy: req.user?.id || req.body.createdBy,
+      });
 
     res.status(201).json({
       success: true,
@@ -227,9 +228,7 @@ const updatePurchase = async (req, res) => {
 
 const receivePurchase = async (req, res) => {
   try {
-    const {
-      userId,
-    } = req.body;
+    const userId = req.user?.id || req.body?.userId;
 
     const purchase =
       await purchasingService.receivePurchase(

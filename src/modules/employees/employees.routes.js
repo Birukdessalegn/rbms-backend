@@ -10,7 +10,7 @@ router.use(authenticate);
 router.get("/", employeesController.getEmployees);
 router.get("/:id", employeesController.getEmployee);
 
-// Only Admin (acting as HR) or designated HR role can create, edit, delete, or manage accounts
+// Only Admin and HR can create, edit, delete, or manage accounts. Manager has read-only access.
 router.post("/", authorize("admin", "hr"), employeesController.createEmployee);
 router.put("/:id", authorize("admin", "hr"), employeesController.updateEmployee);
 router.delete("/:id", authorize("admin", "hr"), employeesController.deleteEmployee);

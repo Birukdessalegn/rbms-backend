@@ -6,21 +6,42 @@ const pool = require("../../config/database");
 
 const getDashboardSummary = async () => {
   const result = await pool.query(`
+    WITH shift_scope AS (
+      SELECT
+        COALESCE(
+          (SELECT MIN(start_time) FROM cashier_shifts WHERE status = 'open'),
+          CASE
+            WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 
+              THEN (CURRENT_DATE - INTERVAL '1 day' + INTERVAL '17 hours')
+            ELSE (CURRENT_DATE + INTERVAL '6 hours')
+          END
+        ) AS current_shift_start,
+        CASE
+          WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
+          ELSE CURRENT_DATE
+        END AS business_date
+    )
     SELECT
 
-      -- Today's sales
+      -- Today's sales (night-shift aware)
       (
-        SELECT COALESCE(SUM(amount), 0)
-        FROM payments
-        WHERE status = 'paid'
-          AND paid_at::date = CURRENT_DATE
+        SELECT COALESCE(SUM(p.amount), 0)
+        FROM payments p, shift_scope s
+        WHERE p.status = 'paid'
+          AND (
+            p.paid_at >= s.current_shift_start
+            OR p.paid_at::date = s.business_date
+          )
       ) AS today_sales,
 
-      -- Today's orders
+      -- Today's orders (night-shift aware)
       (
         SELECT COUNT(*)
-        FROM orders
-        WHERE created_at::date = CURRENT_DATE
+        FROM orders o, shift_scope s
+        WHERE (
+          o.created_at >= s.current_shift_start
+          OR o.created_at::date = s.business_date
+        )
       ) AS today_orders,
 
       -- Total orders
@@ -65,35 +86,39 @@ const getDashboardSummary = async () => {
         WHERE department = 'kitchen' AND quantity <= minimum_stock
       ) AS kitchen_low_stock_products,
 
-      -- Today's items sold total
+      -- Today's items sold total (night-shift aware)
       (
         SELECT COALESCE(SUM(oi.quantity), 0)
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.status != 'cancelled' AND o.created_at::date = CURRENT_DATE
+        CROSS JOIN shift_scope s
+        WHERE o.status != 'cancelled'
+          AND (o.created_at >= s.current_shift_start OR o.created_at::date = s.business_date)
       ) AS today_items_sold,
 
-      -- Today's bar items sold
+      -- Today's bar items sold (night-shift aware)
       (
         SELECT COALESCE(SUM(oi.quantity), 0)
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         JOIN products p ON oi.product_id = p.id
         LEFT JOIN product_categories pc ON p.category_id = pc.id
+        CROSS JOIN shift_scope s
         WHERE o.status != 'cancelled'
-          AND o.created_at::date = CURRENT_DATE
+          AND (o.created_at >= s.current_shift_start OR o.created_at::date = s.business_date)
           AND LOWER(pc.type) IN ('beverage', 'bar')
       ) AS today_bar_items_sold,
 
-      -- Today's kitchen items sold
+      -- Today's kitchen items sold (night-shift aware)
       (
         SELECT COALESCE(SUM(oi.quantity), 0)
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         JOIN products p ON oi.product_id = p.id
         LEFT JOIN product_categories pc ON p.category_id = pc.id
+        CROSS JOIN shift_scope s
         WHERE o.status != 'cancelled'
-          AND o.created_at::date = CURRENT_DATE
+          AND (o.created_at >= s.current_shift_start OR o.created_at::date = s.business_date)
           AND LOWER(pc.type) = 'food'
       ) AS today_kitchen_items_sold,
 
@@ -139,12 +164,12 @@ const getDashboardSummary = async () => {
         WHERE status = 'active'
       ) AS active_employees,
 
-      -- Today's expenses
+      -- Today's expenses (night-shift aware)
       (
-        SELECT COALESCE(SUM(amount), 0)
-        FROM expenses
-        WHERE expense_date = CURRENT_DATE
-          AND status = 'paid'
+        SELECT COALESCE(SUM(e.amount), 0)
+        FROM expenses e, shift_scope s
+        WHERE (e.expense_date = s.business_date OR e.created_at >= s.current_shift_start)
+          AND e.status = 'paid'
       ) AS today_expenses
 
   `);
@@ -159,12 +184,30 @@ const getDashboardSummary = async () => {
 
 const getTodaySales = async () => {
   const result = await pool.query(`
+    WITH shift_scope AS (
+      SELECT
+        COALESCE(
+          (SELECT MIN(start_time) FROM cashier_shifts WHERE status = 'open'),
+          CASE
+            WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 
+              THEN (CURRENT_DATE - INTERVAL '1 day' + INTERVAL '17 hours')
+            ELSE (CURRENT_DATE + INTERVAL '6 hours')
+          END
+        ) AS current_shift_start,
+        CASE
+          WHEN EXTRACT(HOUR FROM CURRENT_TIME) < 7 THEN CURRENT_DATE - 1
+          ELSE CURRENT_DATE
+        END AS business_date
+    )
     SELECT
-      COALESCE(SUM(amount), 0) AS total_sales,
+      COALESCE(SUM(p.amount), 0) AS total_sales,
       COUNT(*) AS payment_count
-    FROM payments
-    WHERE status = 'paid'
-      AND paid_at::date = CURRENT_DATE
+    FROM payments p, shift_scope s
+    WHERE p.status = 'paid'
+      AND (
+        p.paid_at >= s.current_shift_start
+        OR p.paid_at::date = s.business_date
+      )
   `);
 
   return result.rows[0];

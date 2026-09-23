@@ -14,6 +14,9 @@ const createVipCustomer = async (req, res) => {
     const customer = await vipService.createVipCustomer(req.body);
     res.status(201).json({ success: true, data: customer });
   } catch (err) {
+    if (err.code === "23505") {
+      return res.status(400).json({ success: false, message: "A VIP customer with this phone number already exists." });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -23,6 +26,9 @@ const updateVipCustomer = async (req, res) => {
     const customer = await vipService.updateVipCustomer(req.params.id, req.body);
     res.json({ success: true, data: customer });
   } catch (err) {
+    if (err.code === "23505") {
+      return res.status(400).json({ success: false, message: "A VIP customer with this phone number already exists." });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };

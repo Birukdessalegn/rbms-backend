@@ -245,6 +245,15 @@ const getAllOrders = async (waiterUserId = null) => {
       order.payments = paymentsByOrderId[order.id] || [];
       order.items = itemsByOrderId[order.id] || [];
 
+      // Populate primary payment method from payments ledger
+      if (order.payments.length > 0) {
+        order.payment_method = order.payments[0].payment_method;
+      } else if (order.payment_status === "credit_approved" || order.payment_status === "credit_pending") {
+        order.payment_method = "credit";
+      } else {
+        order.payment_method = "cash";
+      }
+
       if (!order.vip_customer_name) {
         const vipPayment = order.payments.find((p) => p.vip_customer_name);
         if (vipPayment) {
@@ -406,6 +415,14 @@ const getOrderById = async (id) => {
   );
 
   order.payments = paymentsResult.rows;
+
+  if (order.payments.length > 0) {
+    order.payment_method = order.payments[0].payment_method;
+  } else if (order.payment_status === "credit_approved" || order.payment_status === "credit_pending") {
+    order.payment_method = "credit";
+  } else {
+    order.payment_method = "cash";
+  }
 
   if (!order.vip_customer_name) {
     const vipPayment = order.payments.find((p) => p.vip_customer_name);

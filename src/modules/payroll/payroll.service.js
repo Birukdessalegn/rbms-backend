@@ -42,6 +42,7 @@ const calculateEthiopianIncomeTax = (taxableIncome) => {
  */
 const getPayrollSummary = async (periodMonth) => {
   const currentMonth = periodMonth || new Date().toISOString().slice(0, 7);
+  const nowMonth = new Date().toISOString().slice(0, 7);
 
   // 1. Check if an approved/saved payroll run already exists for this month
   const savedRunQuery = `
@@ -52,6 +53,28 @@ const getPayrollSummary = async (periodMonth) => {
   `;
   const { rows: savedRuns } = await pool.query(savedRunQuery, [currentMonth]);
   const savedRun = savedRuns[0] || null;
+
+  // 2. If no saved run exists and user is querying a future month, return empty upcoming state
+  if (!savedRun && currentMonth > nowMonth) {
+    return {
+      periodMonth: currentMonth,
+      isSaved: false,
+      status: "upcoming",
+      message: `Payroll for upcoming month (${currentMonth}) cannot be generated yet. Staff shifts and attendance must be completed first.`,
+      savedRun: null,
+      stats: {
+        totalEmployees: 0,
+        totalGross: 0,
+        totalDeductions: 0,
+        totalNet: 0,
+        totalTax: 0,
+        totalPensionEmployee: 0,
+        totalPensionEmployer: 0,
+        totalAbsence: 0
+      },
+      items: []
+    };
+  }
 
   let items = [];
 
@@ -147,7 +170,11 @@ const getPayrollSummary = async (periodMonth) => {
         GROUP BY lr.employee_id
       ) lv ON e.id = lv.employee_id
       WHERE e.status = 'active'
-        AND (e.hire_date IS NULL OR TO_CHAR(e.hire_date, 'YYYY-MM') <= $1)
+        AND (
+          (e.hire_date IS NOT NULL AND TO_CHAR(e.hire_date, 'YYYY-MM') <= $1)
+          OR
+          (e.hire_date IS NULL AND TO_CHAR(e.created_at, 'YYYY-MM') <= $1)
+        )
       ORDER BY e.first_name ASC
     `;
     const { rows } = await pool.query(employeesQuery, [currentMonth]);
@@ -284,6 +311,11 @@ const getPayrollSummary = async (periodMonth) => {
  * Save / Approve monthly payroll run
  */
 const savePayrollRun = async ({ periodMonth, items, notes = "", processedBy = null, status = "approved" }) => {
+  const nowMonth = new Date().toISOString().slice(0, 7);
+  if (periodMonth > nowMonth) {
+    throw new Error(`Cannot approve payroll for future month ${periodMonth}. Staff shifts and attendance must be completed first.`);
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

@@ -48,7 +48,7 @@ const createAccount = async (data) => {
     account_type = "bank",
     provider,
     account_number,
-    account_holder = "Boost Addis",
+    account_holder = "The Oak Club",
     notes = "",
     is_active = true,
   } = data;
@@ -59,7 +59,7 @@ const createAccount = async (data) => {
 
   const cleanProvider = String(provider).trim();
   const cleanAccountNumber = String(account_number).trim();
-  const cleanAccountHolder = account_holder ? String(account_holder).trim() : "Boost Addis";
+  const cleanAccountHolder = account_holder ? String(account_holder).trim() : "The Oak Club";
   const cleanNotes = notes ? String(notes).trim() : null;
   const cleanType = String(account_type || "bank").trim().toLowerCase();
 

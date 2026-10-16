@@ -22,6 +22,7 @@ const vipCustomersRoutes = require("./modules/customers/vip_customers.routes");
 const notificationsRoutes = require("./modules/notifications/notifications.routes");
 const payrollRoutes = require("./modules/payroll/payroll.routes");
 const paymentAccountsRoutes = require("./modules/payment_accounts/payment_accounts.routes");
+const subscriptionRoutes = require("./modules/subscription/subscription.routes");
 
 const app = express();
 
@@ -91,6 +92,7 @@ app.use("/api/vip-customers", vipCustomersRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/payroll", payrollRoutes);
 app.use("/api/payment-accounts", paymentAccountsRoutes);
+app.use("/api/subscription", subscriptionRoutes);
 
 // Test route
 app.get("/", (req, res) => {

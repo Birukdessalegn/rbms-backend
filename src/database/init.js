@@ -334,6 +334,14 @@ const initializeDatabase = async () => {
       END $$;
     `);
 
+    // Initialize system subscription table and initial 30-day active record
+    try {
+      const { initializeSubscriptionTable } = require("../modules/subscription/subscription.service");
+      await initializeSubscriptionTable();
+    } catch (subErr) {
+      console.warn("⚠️ Subscription table initialization notice:", subErr.message);
+    }
+
     console.log("✅ Database schema initialized");
   } catch (error) {
     console.error("❌ Failed to initialize database schema");

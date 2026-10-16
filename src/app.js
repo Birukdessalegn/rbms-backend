@@ -26,8 +26,10 @@ const subscriptionRoutes = require("./modules/subscription/subscription.routes")
 
 const app = express();
 
-// CORS configuration - strictly HTTPS in production
-const defaultOrigins = ["https://theoak.ambbatech.com"];
+const defaultOrigins = [
+  "https://theoak.ambbatech.com",
+  "https://masterbiruknati.ambbatech.com",
+];
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())

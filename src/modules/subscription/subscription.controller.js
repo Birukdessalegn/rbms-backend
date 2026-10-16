@@ -1,8 +1,8 @@
 const subscriptionService = require("./subscription.service");
 
-// Vendor master secret key from env or secure default
-const VENDOR_SECRET_KEY = process.env.VENDOR_SECRET_KEY || "AMBBA-RBMS-MASTER-2026";
-const VENDOR_MASTER_PIN = process.env.VENDOR_MASTER_PIN || "9988";
+// Vendor master credentials from secure environment variables only
+const VENDOR_SECRET_KEY = process.env.VENDOR_SECRET_KEY;
+const VENDOR_MASTER_PIN = process.env.VENDOR_MASTER_PIN;
 
 /**
  * GET /api/subscription/status

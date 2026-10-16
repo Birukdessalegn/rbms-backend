@@ -97,7 +97,11 @@ async function getSubscriptionStatus() {
   let isGracePeriod = false;
   let isExpired = false;
 
-  if (diffMs > 0) {
+  // If manually deactivated/suspended by vendor
+  if (sub.is_active === false) {
+    status = "expired";
+    isExpired = true;
+  } else if (diffMs > 0) {
     if (daysRemaining <= 5) {
       status = "warning"; // <= 5 days remaining
     } else {
@@ -116,10 +120,10 @@ async function getSubscriptionStatus() {
   return {
     id: sub.id,
     clientName: sub.client_name,
-    isActive: sub.is_active && !isExpired,
+    isActive: sub.is_active === true && !isExpired,
     status, // 'active' | 'warning' | 'grace' | 'expired'
-    daysRemaining: Math.max(0, daysRemaining),
-    hoursRemaining,
+    daysRemaining: isExpired ? 0 : Math.max(0, daysRemaining),
+    hoursRemaining: isExpired ? 0 : hoursRemaining,
     graceDaysRemaining: isGracePeriod ? Math.max(0, Math.ceil(diffGraceMs / (1000 * 60 * 60 * 24))) : 0,
     isGracePeriod,
     isExpired,
@@ -134,13 +138,14 @@ async function getSubscriptionStatus() {
 }
 
 /**
- * Renew or extend subscription
+ * Renew, extend, or suspend subscription
  * @param {Object} params
  * @param {number} [params.days=30] Number of days to extend
  * @param {string} [params.newExpiryDate] Specific ISO date to set
  * @param {string} [params.notes] Payment or reference note
+ * @param {boolean} [params.isSuspended=false] Whether to suspend/block immediately
  */
-async function renewSubscription({ days = 30, newExpiryDate, notes }) {
+async function renewSubscription({ days = 30, newExpiryDate, notes, isSuspended = false }) {
   await initializeSubscriptionTable();
 
   const { rows } = await pool.query(
@@ -150,7 +155,24 @@ async function renewSubscription({ days = 30, newExpiryDate, notes }) {
   let currentExpiry = rows.length > 0 ? new Date(rows[0].expires_at) : new Date();
   const now = new Date();
 
-  // If already expired, start 30 days from now; if still active, add 30 days to existing expiry
+  // If vendor wants to lock/suspend this client immediately
+  if (isSuspended) {
+    const expiredDate = new Date(now.getTime() - 5 * 86400000); // 5 days in past (past grace period)
+    await pool.query(
+      `UPDATE system_subscription 
+       SET 
+         is_active = FALSE,
+         expires_at = $1,
+         last_renewed_at = NOW(),
+         notes = COALESCE($2, notes),
+         updated_at = NOW()
+       WHERE id = (SELECT id FROM system_subscription ORDER BY id ASC LIMIT 1)`,
+      [expiredDate.toISOString(), notes || "Suspended by Vendor Master Portal"]
+    );
+    return getSubscriptionStatus();
+  }
+
+  // Otherwise, active extension
   let updatedExpiry;
   if (newExpiryDate) {
     updatedExpiry = new Date(newExpiryDate);
@@ -159,7 +181,7 @@ async function renewSubscription({ days = 30, newExpiryDate, notes }) {
     updatedExpiry = new Date(baseDate.getTime() + Number(days) * 86400000);
   }
 
-  const result = await pool.query(
+  await pool.query(
     `UPDATE system_subscription 
      SET 
        is_active = TRUE,
@@ -167,8 +189,7 @@ async function renewSubscription({ days = 30, newExpiryDate, notes }) {
        last_renewed_at = NOW(),
        notes = COALESCE($2, notes),
        updated_at = NOW()
-     WHERE id = (SELECT id FROM system_subscription ORDER BY id ASC LIMIT 1)
-     RETURNING *`,
+     WHERE id = (SELECT id FROM system_subscription ORDER BY id ASC LIMIT 1)`,
     [updatedExpiry.toISOString(), notes || `Extended by ${days} days`]
   );
 

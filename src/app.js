@@ -31,26 +31,36 @@ const defaultOrigins = [
   "https://masterbiruknati.ambbatech.com",
 ];
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
+const envOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-  : defaultOrigins;
+  : [];
 
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (curl, mobile apps, server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    // Allow server-to-server or curl requests with no origin
+    if (!origin) return callback(null, true);
+
+    // Automatically allow any AmbbaTech subdomain (theoak, masterbiruknati, etc.)
+    const isAmbbaDomain = /^https?:\/\/([a-zA-Z0-9-]+\.)*ambbatech\.com(:[0-9]+)?$/.test(origin);
+    if (isAmbbaDomain) return callback(null, true);
+
+    // Allow explicitly configured origins in .env
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // Allow localhost during local testing
+    if (origin.startsWith("http://localhost:")) return callback(null, true);
+
     return callback(null, false);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "X-Vendor-Key"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "X-Vendor-Key", "X-Master-Key"],
   optionsSuccessStatus: 200
 };
 
-// Apply CORS middleware (handles regular & preflight requests)
+// Apply CORS middleware (handles regular & preflight requests automatically in Express 5)
 app.use(cors(corsOptions));
 
 // Security Headers Middleware (OWASP recommended, native Express)

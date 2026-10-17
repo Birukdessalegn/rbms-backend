@@ -36,7 +36,7 @@ async function getStatus(req, res) {
 async function renew(req, res) {
   try {
     const vendorHeaderKey = req.headers["x-vendor-key"] || req.headers["x-master-key"];
-    const { masterPin, days = 30, newExpiryDate, notes, isSuspended = false } = req.body;
+    const { masterPin, days = 30, newExpiryDate, notes, isSuspended = false, reset = false, isReset = false } = req.body;
 
     // Check authorization
     const isVendorKeyValid = vendorHeaderKey && vendorHeaderKey.trim() === VENDOR_SECRET_KEY;
@@ -50,18 +50,26 @@ async function renew(req, res) {
       });
     }
 
+    const shouldReset = Boolean(reset || isReset);
+
     const updated = await subscriptionService.renewSubscription({
       days: Number(days) || 30,
       newExpiryDate,
-      notes: notes || (isSuspended ? "Suspended by Vendor Master Portal" : `Extended by ${days} days`),
+      notes: notes || (shouldReset ? "Cleared & Reset by Vendor Master Portal" : isSuspended ? "Suspended by Vendor Master Portal" : `Extended by ${days} days`),
       isSuspended: Boolean(isSuspended),
+      reset: shouldReset,
     });
+
+    let returnMessage = `Subscription successfully renewed! Active through ${new Date(updated.expiresAt).toLocaleDateString()}`;
+    if (shouldReset) {
+      returnMessage = "Subscription dates successfully cleared and reset to 0 Days!";
+    } else if (isSuspended) {
+      returnMessage = "Subscription successfully suspended / locked!";
+    }
 
     res.json({
       success: true,
-      message: isSuspended 
-        ? "Subscription successfully suspended / locked!" 
-        : `Subscription successfully renewed! Active through ${new Date(updated.expiresAt).toLocaleDateString()}`,
+      message: returnMessage,
       data: updated,
     });
   } catch (err) {

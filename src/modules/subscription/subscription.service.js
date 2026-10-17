@@ -143,8 +143,9 @@ async function getSubscriptionStatus() {
  * @param {string} [params.newExpiryDate] Specific ISO date to set
  * @param {string} [params.notes] Payment or reference note
  * @param {boolean} [params.isSuspended=false] Whether to suspend/block immediately
+ * @param {boolean} [params.reset=false] Whether to clear and reset days back to 0
  */
-async function renewSubscription({ days = 30, newExpiryDate, notes, isSuspended = false }) {
+async function renewSubscription({ days = 30, newExpiryDate, notes, isSuspended = false, reset = false }) {
   await initializeSubscriptionTable();
 
   const { rows } = await pool.query(
@@ -153,6 +154,22 @@ async function renewSubscription({ days = 30, newExpiryDate, notes, isSuspended 
 
   let currentExpiry = rows.length > 0 ? new Date(rows[0].expires_at) : new Date();
   const now = new Date();
+
+  // If vendor wants to completely CLEAR / RESET the license back to 0 days
+  if (reset) {
+    await pool.query(
+      `UPDATE system_subscription 
+       SET 
+         is_active = FALSE,
+         expires_at = NOW(),
+         last_renewed_at = NOW(),
+         notes = COALESCE($1, 'Cleared & Reset to 0 Days by Vendor Master Portal'),
+         updated_at = NOW()
+       WHERE id = (SELECT id FROM system_subscription ORDER BY id ASC LIMIT 1)`,
+      [notes || "Cleared & Reset to 0 Days by Vendor Master Portal"]
+    );
+    return getSubscriptionStatus();
+  }
 
   // If vendor wants to lock/suspend this client immediately
   if (isSuspended) {

@@ -21,25 +21,23 @@ async function initializeSubscriptionTable() {
       );
     `);
 
-    // Check if subscription record exists, otherwise seed an initial 30 days
+    // Check if subscription record exists, otherwise seed an INACTIVE initial record (pending vendor activation)
     const { rows } = await pool.query(`SELECT id FROM system_subscription LIMIT 1`);
     if (rows.length === 0) {
-      const initialExpiry = new Date();
-      initialExpiry.setDate(initialExpiry.getDate() + 30);
-
+      const now = new Date();
       await pool.query(
         `INSERT INTO system_subscription 
           (client_name, is_active, start_date, expires_at, grace_days, notes) 
          VALUES ($1, $2, NOW(), $3, $4, $5)`,
         [
           "The Oak Club",
-          true,
-          initialExpiry.toISOString(),
+          false,
+          now.toISOString(),
           3,
-          "Initial system setup - 30 days monthly purchase cycle",
+          "Pending initial license activation from AmbbaTech Master Portal",
         ]
       );
-      console.log("✅ Initial 30-day subscription seeded for The Oak Club");
+      console.log("🔒 Initial subscription record created as INACTIVE (Pending Vendor Activation)");
     }
   } catch (err) {
     console.error("⚠️ Failed to initialize system_subscription table:", err.message);
@@ -64,19 +62,20 @@ async function getSubscriptionStatus() {
   }
 
   if (!sub) {
-    const fallbackExpiry = new Date(Date.now() + 30 * 86400000);
+    const now = new Date();
     return {
-      status: "active",
+      status: "expired",
       clientName: "The Oak Club",
-      isActive: true,
-      daysRemaining: 30,
-      hoursRemaining: 720,
+      isActive: false,
+      daysRemaining: 0,
+      hoursRemaining: 0,
       isGracePeriod: false,
-      isExpired: false,
-      expiresAt: fallbackExpiry.toISOString(),
-      hardLockoutDate: new Date(fallbackExpiry.getTime() + 3 * 86400000).toISOString(),
+      isExpired: true,
+      expiresAt: now.toISOString(),
+      hardLockoutDate: now.toISOString(),
       graceDays: 3,
-      serverTime: new Date().toISOString(),
+      notes: "Pending initial license activation from AmbbaTech Master Portal",
+      serverTime: now.toISOString(),
     };
   }
 
@@ -177,7 +176,10 @@ async function renewSubscription({ days = 30, newExpiryDate, notes, isSuspended 
   if (newExpiryDate) {
     updatedExpiry = new Date(newExpiryDate);
   } else {
-    const baseDate = currentExpiry > now ? currentExpiry : now;
+    // If currently active and unexpired, add days to existing expiration.
+    // Otherwise, start counting days fresh from NOW.
+    const isCurrentlyActive = rows.length > 0 && rows[0].is_active === true && currentExpiry > now;
+    const baseDate = isCurrentlyActive ? currentExpiry : now;
     updatedExpiry = new Date(baseDate.getTime() + Number(days) * 86400000);
   }
 

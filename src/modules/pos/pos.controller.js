@@ -527,6 +527,46 @@ const getTodayStaffOrders = async (req, res) => {
   }
 };
 
+// ============================================================
+// VIP / CREDIT ORDER APPROVE & REJECT
+// ============================================================
+
+const approveCreditOrder = async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const order = await posService.approveCreditOrder(orderId, req.user);
+    res.json({
+      success: true,
+      message: "Credit payment successfully approved",
+      order,
+    });
+  } catch (error) {
+    console.error("Approve credit order error:", error);
+    res.status(error.message === "Order not found" ? 404 : 500).json({
+      success: false,
+      message: error.message || "Failed to approve credit order",
+    });
+  }
+};
+
+const rejectCreditOrder = async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const order = await posService.rejectCreditOrder(orderId, req.user);
+    res.json({
+      success: true,
+      message: "Credit payment rejected",
+      order,
+    });
+  } catch (error) {
+    console.error("Reject credit order error:", error);
+    res.status(error.message === "Order not found" ? 404 : 500).json({
+      success: false,
+      message: error.message || "Failed to reject credit order",
+    });
+  }
+};
+
 module.exports = {
   getOrders,
   getOrder,
@@ -538,6 +578,8 @@ module.exports = {
   removeOrderItem,
   updateOrderItem,
   createPayment,
+  approveCreditOrder,
+  rejectCreditOrder,
 
   getTables,
   createTable,

@@ -124,6 +124,20 @@ router.post(
   posController.createPayment
 );
 
+// Approve VIP / Credit payment
+router.post(
+  "/orders/:id/approve-credit",
+  authenticate,
+  posController.approveCreditOrder
+);
+
+// Reject VIP / Credit payment
+router.post(
+  "/orders/:id/reject-credit",
+  authenticate,
+  posController.rejectCreditOrder
+);
+
 // ============================================================
 // RESTAURANT TABLES
 // ============================================================

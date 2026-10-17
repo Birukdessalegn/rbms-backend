@@ -2604,6 +2604,43 @@ const getTodayStaffOrders = async () => {
 };
 
 // ============================================================
+// VIP / CREDIT ORDER APPROVAL & REJECTION
+// ============================================================
+
+const approveCreditOrder = async (orderId, user) => {
+  const result = await pool.query(
+    `UPDATE orders 
+     SET 
+       payment_status = 'credit_approved',
+       status = CASE WHEN status = 'pending' THEN 'completed' ELSE status END,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [orderId]
+  );
+  if (result.rows.length === 0) {
+    throw new Error("Order not found");
+  }
+  return result.rows[0];
+};
+
+const rejectCreditOrder = async (orderId, user) => {
+  const result = await pool.query(
+    `UPDATE orders 
+     SET 
+       payment_status = 'credit_rejected',
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [orderId]
+  );
+  if (result.rows.length === 0) {
+    throw new Error("Order not found");
+  }
+  return result.rows[0];
+};
+
+// ============================================================
 // EXPORTS
 // ============================================================
 
@@ -2618,6 +2655,8 @@ module.exports = {
   removeOrderItem,
   updateOrderItem,
   createPayment,
+  approveCreditOrder,
+  rejectCreditOrder,
 
   getAllTables,
   createTable,

@@ -245,13 +245,29 @@ const getAllOrders = async (waiterUserId = null) => {
       order.payments = paymentsByOrderId[order.id] || [];
       order.items = itemsByOrderId[order.id] || [];
 
-      // Populate primary payment method from payments ledger
+      // Populate primary payment method and breakdown from payments ledger
       if (order.payments.length > 0) {
-        order.payment_method = order.payments[0].payment_method;
+        const distinctMethods = [...new Set(order.payments.map((p) => String(p.payment_method || '').toLowerCase()))];
+        const breakdown = {};
+        for (const p of order.payments) {
+          const m = String(p.payment_method || 'cash').toLowerCase();
+          breakdown[m] = Number(((breakdown[m] || 0) + Number(p.amount || 0)).toFixed(2));
+        }
+        order.payment_breakdown = breakdown;
+
+        if (distinctMethods.length > 1) {
+          order.payment_method = "split";
+          order.is_split_payment = true;
+        } else {
+          order.payment_method = order.payments[0].payment_method;
+          order.is_split_payment = false;
+        }
       } else if (order.payment_status === "credit_approved" || order.payment_status === "credit_pending") {
         order.payment_method = "credit";
+        order.is_split_payment = false;
       } else {
         order.payment_method = "cash";
+        order.is_split_payment = false;
       }
 
       if (!order.vip_customer_name) {
@@ -417,11 +433,27 @@ const getOrderById = async (id) => {
   order.payments = paymentsResult.rows;
 
   if (order.payments.length > 0) {
-    order.payment_method = order.payments[0].payment_method;
+    const distinctMethods = [...new Set(order.payments.map((p) => String(p.payment_method || '').toLowerCase()))];
+    const breakdown = {};
+    for (const p of order.payments) {
+      const m = String(p.payment_method || 'cash').toLowerCase();
+      breakdown[m] = Number(((breakdown[m] || 0) + Number(p.amount || 0)).toFixed(2));
+    }
+    order.payment_breakdown = breakdown;
+
+    if (distinctMethods.length > 1) {
+      order.payment_method = "split";
+      order.is_split_payment = true;
+    } else {
+      order.payment_method = order.payments[0].payment_method;
+      order.is_split_payment = false;
+    }
   } else if (order.payment_status === "credit_approved" || order.payment_status === "credit_pending") {
     order.payment_method = "credit";
+    order.is_split_payment = false;
   } else {
     order.payment_method = "cash";
+    order.is_split_payment = false;
   }
 
   if (!order.vip_customer_name) {

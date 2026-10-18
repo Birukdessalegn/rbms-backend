@@ -10,7 +10,7 @@ const getPaymentSalesStats = async (cashierId, startTime, endTime = null, shiftI
     SELECT 
       COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) AS cash_sales,
       COALESCE(SUM(CASE WHEN LOWER(payment_method) IN ('card', 'pos', 'visa', 'mastercard') THEN amount ELSE 0 END), 0) AS card_sales,
-      COALESCE(SUM(CASE WHEN LOWER(payment_method) IN ('telebirr', 'cbe_birr', 'cbebirr', 'mobile', 'bank_transfer', 'transfer') THEN amount ELSE 0 END), 0) AS mobile_sales,
+      COALESCE(SUM(CASE WHEN LOWER(payment_method) IN ('telebirr', 'tele_birr', 'cbe', 'cbe_birr', 'cbebirr', 'mobile', 'mobile_money', 'bank_transfer', 'transfer') THEN amount ELSE 0 END), 0) AS mobile_sales,
       COALESCE(SUM(CASE WHEN LOWER(payment_method) IN ('credit', 'vip') THEN amount ELSE 0 END), 0) AS credit_sales,
       COALESCE(SUM(amount), 0) AS total_sales,
       COUNT(DISTINCT order_id) AS total_orders_count

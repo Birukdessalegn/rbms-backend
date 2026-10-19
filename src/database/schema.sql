@@ -398,6 +398,8 @@ CREATE TABLE IF NOT EXISTS products (
     allow_full_bottle BOOLEAN DEFAULT TRUE,
     applicable_for VARCHAR(50) DEFAULT 'both',
     tags VARCHAR(255) DEFAULT '',
+    low_stock_threshold NUMERIC(12,2) DEFAULT 5,
+    out_of_stock_threshold NUMERIC(12,2) DEFAULT 0,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -805,6 +807,11 @@ CREATE TABLE IF NOT EXISTS payments (
     paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     received_by UUID REFERENCES users(id),
+    approved_by UUID REFERENCES users(id),
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    received_at TIMESTAMP,
+    receiving_notes TEXT,
 
     image_url TEXT,
 
@@ -1253,6 +1260,7 @@ CREATE TABLE IF NOT EXISTS department_inventory (
     quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
     minimum_stock NUMERIC(12,3) NOT NULL DEFAULT 5,
     maximum_stock NUMERIC(12,3),
+    out_of_stock_threshold NUMERIC(12,2) DEFAULT 0,
     unit VARCHAR(30) DEFAULT 'pcs',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(department, product_id)
@@ -1275,6 +1283,11 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
     requested_by UUID REFERENCES users(id),
     dispatched_by UUID REFERENCES users(id),
     received_by UUID REFERENCES users(id),
+    approved_by UUID REFERENCES users(id),
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    received_at TIMESTAMP,
+    receiving_notes TEXT,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1406,3 +1419,29 @@ CREATE INDEX IF NOT EXISTS idx_shortage_created ON stock_shortage_requests(creat
 
 
 SELECT 'RBMS database schema created successfully!' AS message;
+
+-- ============================================================
+-- PAYMENT ACCOUNTS (Multi-Channel Cash / Bank / Digital)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS payment_accounts (
+    id SERIAL PRIMARY KEY,
+    account_name VARCHAR(100) NOT NULL,
+    account_type VARCHAR(50) NOT NULL, -- 'bank', 'telebirr', 'cbe_birr', 'cash', 'other'
+    bank_name VARCHAR(100),
+    account_number VARCHAR(100),
+    account_holder VARCHAR(150),
+    current_balance NUMERIC(14,2) DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_accounts_active ON payment_accounts(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_restaurant_tables_bar_seat ON restaurant_tables(is_bar_seat);
+CREATE INDEX IF NOT EXISTS idx_restaurant_tables_type ON restaurant_tables(type);
+CREATE INDEX IF NOT EXISTS idx_orders_bar_order ON orders(is_bar_order);
+CREATE INDEX IF NOT EXISTS idx_orders_bartender_id ON orders(bartender_id);
+CREATE INDEX IF NOT EXISTS idx_cashier_shifts_cashier_status ON cashier_shifts(cashier_id, status);
